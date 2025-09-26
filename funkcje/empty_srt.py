@@ -10,6 +10,9 @@ Generuje empty.srt w tym samym katalogu co ten moduł.
 import os
 import glob
 
+TEMP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "temp"))
+os.makedirs(TEMP_DIR, exist_ok=True)
+
 def seconds_to_srt_time(sec):
     """
     Przyjmuje liczbę sekund (float), zwraca 'HH:MM:SS,mmm'
@@ -127,9 +130,10 @@ def _choose_txt_file():
 
     return None
 
+
 def run():
     txt_file = _choose_txt_file()
-    srt_file = os.path.join(os.path.dirname(__file__), "empty.srt")
+    srt_file = os.path.join(TEMP_DIR, "empty.srt")
 
     if txt_file:
         try:

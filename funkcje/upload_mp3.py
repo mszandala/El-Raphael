@@ -1,11 +1,11 @@
 import os
 import shutil
 
-def upload_mp3_to_chapter(mp3_files, chapter_folder):
-    """
-    Kopiuje pliki mp3 do podfolderu 'mp3' w chapter_folder.
-    """
-    mp3_dir = os.path.join(chapter_folder, "mp3")
+TEMP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "temp"))
+os.makedirs(TEMP_DIR, exist_ok=True)
+
+def upload_mp3_to_chapter(mp3_files):
+    mp3_dir = os.path.join(TEMP_DIR, "mp3")
     os.makedirs(mp3_dir, exist_ok=True)
     count = 0
 
@@ -18,11 +18,19 @@ def upload_mp3_to_chapter(mp3_files, chapter_folder):
                 f.write(data)
             count += 1
         else:
-            # normalna ścieżka (lokalnie)
-            shutil.copy2(mp3_file, mp3_dir)
+            # normalna ścieżka (lokalnie / albo pliki w /content)
+            dest_path = os.path.join(mp3_dir, os.path.basename(mp3_file))
+            shutil.copy2(mp3_file, dest_path)
             count += 1
+            # jeśli plik był w /content, usuń oryginał
+            try:
+                if mp3_file.startswith("/content/"):
+                    os.remove(mp3_file)
+            except Exception:
+                pass
 
     print(f"🎵 Wgrano {count} plików do: {mp3_dir}")
+
 
 
 def run():

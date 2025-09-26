@@ -1,6 +1,9 @@
 import re
 import os
 
+TEMP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "temp"))
+os.makedirs(TEMP_DIR, exist_ok=True)
+
 def get_chapter(input_file, chapter_number):
     """Wyciąga jeden rozdział z pliku TXT i zapisuje do pliku w katalogu programu."""
     with open(input_file, "r", encoding="utf-8") as f:
@@ -18,7 +21,7 @@ def get_chapter(input_file, chapter_number):
     if 1 <= chapter_number <= len(parsed):
         title, content = parsed[chapter_number - 1]
         file_name = title.replace(" ", "_") + ".txt"
-        output_path = os.path.join(os.getcwd(), file_name)
+        output_path = os.path.join(TEMP_DIR, file_name)
 
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(content)
