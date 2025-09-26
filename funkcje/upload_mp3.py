@@ -22,10 +22,13 @@ def upload_mp3_to_chapter(mp3_files):
                 f.write(data)
             count += 1
         else:
-            # lokalna ścieżka
-            dest_path = os.path.join(mp3_dir, os.path.basename(mp3_file))
-            shutil.copy2(mp3_file, dest_path)
-            count += 1
+            # lokalna ścieżka – kopiujemy tylko do TEMP_DIR/mp3
+            # pomijamy oryginał w /content
+            if not mp3_file.startswith("/content/"):
+                dest_path = os.path.join(mp3_dir, os.path.basename(mp3_file))
+                import shutil
+                shutil.copy2(mp3_file, dest_path)
+                count += 1
 
     print(f"🎵 Wgrano {count} plików do: {mp3_dir}")
 
