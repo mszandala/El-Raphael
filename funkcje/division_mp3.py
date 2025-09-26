@@ -1,3 +1,10 @@
+import os
+import re
+import whisper
+from pydub import AudioSegment
+from rapidfuzz import fuzz, process
+
+
 # Ścieżki bazowe
 BASE_DIR = "/content/El-Raphael/temp"
 TXT_FILE = os.path.join(BASE_DIR, "ROZDZIAŁ_I.txt")   # plik z tekstem rozdziału
