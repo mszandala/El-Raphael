@@ -6,7 +6,7 @@ def get_chapter(input_file, chapter_number):
     with open(input_file, "r", encoding="utf-8") as f:
         text = f.read()
 
-    # Podział na rozdziały: ['', 'ROZDZIAŁ I', 'treść...', 'ROZDZIAŁ II', 'treść...']
+    # Podział na rozdziały wg nagłówków
     chapters = re.split(r'(ROZDZIAŁ [IVXLCDM]+)', text)
 
     parsed = []
@@ -24,21 +24,24 @@ def get_chapter(input_file, chapter_number):
             f.write(content)
 
         print(f"✅ Zapisano rozdział {chapter_number}: {output_path}")
+        return output_path
     else:
         print(f"⚠️ Brak rozdziału nr {chapter_number}. Dostępnych: {len(parsed)}")
+        return None
 
 
-def run():
-    """Uruchamia moduł w trybie interaktywnym (dla main.py)."""
-    input_file = "w-pustyni-i-w-puszczy.txt"
+def run(chapter_number=None):
+    """Uruchamia moduł w trybie interaktywnym (dla Colaba lub lokalnie)."""
+    input_file = "/content/El-Raphael/w-pustyni-i-w-puszczy.txt"
     if not os.path.exists(input_file):
-        print("⚠️ Nie znaleziono pliku!")
+        print(f"⚠️ Nie znaleziono pliku: {input_file}")
         return
 
-    try:
-        chapter_number = int(input("📖 Podaj numer rozdziału do wycięcia: ").strip())
-    except ValueError:
-        print("⚠️ Musisz wpisać liczbę!")
-        return
+    if chapter_number is None:
+        try:
+            chapter_number = int(input("📖 Podaj numer rozdziału do wycięcia: ").strip())
+        except ValueError:
+            print("⚠️ Musisz wpisać liczbę!")
+            return
 
-    get_chapter(input_file, chapter_number)
+    return get_chapter(input_file, chapter_number)
