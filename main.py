@@ -25,6 +25,7 @@ def menu():
     Etap 4: Podział rozdziału
     """
     print("\nETAP 4: Podział rozdziału")
+    
 
 
 
