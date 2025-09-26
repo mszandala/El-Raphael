@@ -6,6 +6,16 @@ txt_file = "/content/El-Raphael/temp/z_enterami.txt"
 output_dir = "/content/El-Raphael/"
 
 
+def clean_text_block(text: str) -> str:
+    """
+    Usuwa puste linie wewnątrz jednego bloku tekstowego.
+    Zastępuje wielokrotne entery jednym.
+    """
+    # Rozbij na linie, odrzuć puste, połącz z '\n'
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return "\n".join(lines)
+
+
 def run():
     # Wczytaj pusty plik SRT
     with open(empty_srt, "r", encoding="utf-8") as f:
@@ -32,7 +42,7 @@ def run():
     final_srt = []
     for i, srt_block in enumerate(srt_lines):
         if i < len(blocks):
-            text = blocks[i]
+            text = clean_text_block(blocks[i])
         else:
             text = ""
         final_srt.append(srt_block.strip() + "\n" + text)
