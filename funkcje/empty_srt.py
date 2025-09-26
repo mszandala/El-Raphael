@@ -139,7 +139,17 @@ def run():
         try:
             txt_to_srt(txt_file, srt_file)
             print(f"✅ Plik {srt_file} został utworzony.")
+
+            # jeśli plik pochodzi z Colaba (/content), usuń go
+            if txt_file.startswith("/content/"):
+                try:
+                    os.remove(txt_file)
+                    print(f"🗑️ Tymczasowy plik źródłowy usunięty: {txt_file}")
+                except Exception as e:
+                    print(f"⚠️ Nie udało się usunąć tymczasowego pliku: {e}")
+
         except Exception as e:
             print("❌ Wystąpił błąd podczas tworzenia SRT:", e)
     else:
         print("⚠️ Nie wybrano pliku. Anulowano.")
+
