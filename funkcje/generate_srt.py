@@ -30,9 +30,11 @@ def run():
     blocks = [b.strip() for b in blocks if b.strip()]
 
     # Ustal nazwę pliku wynikowego na podstawie pierwszego bloku
-    chapter_match = re.search(r"(ROZDZIAŁ_\w+)", txt_content)
+    chapter_match = re.search(r"ROZDZIAŁ\s+([IVXLC0-9]+)", txt_content, re.IGNORECASE)
     if chapter_match:
-        output_filename = chapter_match.group(1) + ".srt"
+        # Zamień spację na "_" w nazwie pliku
+        chapter_name = "ROZDZIAŁ_" + chapter_match.group(1)
+        output_filename = chapter_name + ".srt"
     else:
         output_filename = "output.srt"
 
