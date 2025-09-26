@@ -1,8 +1,9 @@
 import os
 import shutil
 
-# katalog wynikowy w temp
-TEMP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "temp"))
+# Stały katalog wynikow
+BASE_DIR = "/content/El-Raphael"
+TEMP_DIR = os.path.join(BASE_DIR, "temp")
 mp3_dir = os.path.join(TEMP_DIR, "mp3")
 os.makedirs(mp3_dir, exist_ok=True)
 
@@ -23,12 +24,9 @@ def upload_mp3_to_chapter(mp3_files):
             count += 1
         else:
             # lokalna ścieżka – kopiujemy tylko do TEMP_DIR/mp3
-            # pomijamy oryginał w /content
-            if not mp3_file.startswith("/content/"):
-                dest_path = os.path.join(mp3_dir, os.path.basename(mp3_file))
-                import shutil
-                shutil.copy2(mp3_file, dest_path)
-                count += 1
+            dest_path = os.path.join(mp3_dir, os.path.basename(mp3_file))
+            shutil.copy2(mp3_file, dest_path)
+            count += 1
 
     print(f"🎵 Wgrano {count} plików do: {mp3_dir}")
 
