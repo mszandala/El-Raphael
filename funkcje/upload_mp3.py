@@ -63,6 +63,6 @@ def run():
     os.makedirs(chapter_folder, exist_ok=True)
 
     if mp3_files:
-        upload_mp3_to_chapter(mp3_files, chapter_folder)
+        upload_mp3_to_chapter(mp3_files)
     else:
         print("⚠️ Nie wybrano plików.")
