@@ -56,26 +56,9 @@ def txt_to_srt(txt_file, srt_file):
                 print(f"⚠️ Pomijam linię (nie znaleziono 2 liczb): {line}")
                 continue
             start, end = floats
-            # sprawdź, czy po dwóch liczbach jest etykieta (np. 'rozdzial 9')
-            label = ""
-            try:
-                last_idx = float_indices[1]
-                if last_idx + 1 < len(tokens):
-                    label = " ".join(tokens[last_idx+1:]).strip()
-            except Exception:
-                label = ""
-
-            if label:
-                # wzorce etykiet rozdziałów, można rozbudować
-                if re.match(r'^(rozdz|rozdzia[lł]|chapter|rozdz\.)\b', label, re.I):
-                    print(f"ℹ️ Pomijam etykietę rozdziału: {label}")
-                    continue
-                # jeśli etykieta jest tylko liczbą (np. '9') i najpierw było słowo 'rozdzial' w oryginale,
-                # zostawiamy już wykryte powyżej; ale można też pomijać same liczby jeśli trzeba
-                if re.match(r'^\d+$', label):
-                    # krótkie etykiety składające się tylko z numerów pomijamy
-                    print(f"ℹ️ Pomijam krótką etykietę/numer: {label}")
-                    continue
+            # Nie pomijamy etykiet ani opisu — każda linia posiadająca dwie liczby
+            # (start i end) będzie zapisana jako pusty wpis SRT. Tekst po liczbach
+            # jest ignorowany przy tworzeniu napisu.
             # sanity check: end >= start
             if end < start:
                 print(f"⚠️ Uwaga: end < start w linii: {line} — przełączam miejscami.")
