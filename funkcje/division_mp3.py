@@ -21,7 +21,6 @@ def run():
     TXT_FILE = znajdz_plik_rozdzialu(BASE_DIR)
     print(f"📄 Znaleziono plik rozdziału: {TXT_FILE}")
 
-    
     # 🔹 1. Ładowanie modelu Whisper
     print("⏳ Ładowanie modelu Whisper...")
     model = whisper.load_model("small")  # small/base/medium/large
@@ -47,26 +46,40 @@ def run():
     for idx, mp3 in enumerate(mp3_files, start=1):
         nazwa = os.path.basename(mp3)
         print(f"\n🎧 [{idx}] Przetwarzam początek nagrania: {nazwa}")
-        temp_file = os.path.join(BASE_DIR, "cut_" + nazwa)
+        
+        try:
+            temp_file = os.path.join(BASE_DIR, f"cut_{idx}_{nazwa}")
+            
+            # Przetnij audio i zapisz
+            przytnij_do_poczatku(mp3, 5).export(temp_file, format="mp3")
 
-        przytnij_do_poczatku(mp3, 5).export(temp_file, format="mp3")
+            # Transkrypcja
+            result = model.transcribe(
+                temp_file,
+                fp16=False,
+                language="pl",
+                temperature=0,
+                condition_on_previous_text=False
+            )
 
-        result = model.transcribe(
-            temp_file,
-            fp16=False,
-            language="pl",
-            temperature=0,
-            condition_on_previous_text=False
-        )
+            words = result["text"].strip().split()
+            pierwsze_slowa = " ".join(words[:3]) if len(words) >= 3 else " ".join(words)
 
-        words = result["text"].strip().split()
-        pierwsze_slowa = " ".join(words[:3]) if len(words) >= 3 else " ".join(words)
+            if pierwsze_slowa:
+                print(f"🔎 [{idx}] Znalezione pierwsze słowa: {pierwsze_slowa}")
+                frazy.append({"plik": nazwa, "fraza": pierwsze_slowa})
+            else:
+                print(f"⚠️ [{idx}] Nie udało się rozpoznać początku nagrania.")
+            
+            # Usuń tymczasowy plik
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+                
+        except Exception as e:
+            print(f"❌ [{idx}] Błąd przy przetwarzaniu {nazwa}: {e}")
+            continue
 
-        if pierwsze_slowa:
-            print(f"🔎 [{idx}] Znalezione pierwsze słowa: {pierwsze_slowa}")
-            frazy.append({"plik": nazwa, "fraza": pierwsze_slowa})
-        else:
-            print(f"⚠️ [{idx}] Nie udało się rozpoznać początku nagrania.")
+    print(f"\n📋 Podsumowanie transkrypcji: znaleziono {len(frazy)} fraz z {len(mp3_files)} plików")
 
     # 🔧 Funkcja wstawiająca entery z fuzzy matching
     def wstaw_entery_z_fuzzy(text, frazy, prog=70):
@@ -78,7 +91,15 @@ def run():
             fraza = item["fraza"]
             plik = item["plik"]
 
-            zdania = re.split(r'(?<=[\.\!\?])\s+', new_text)
+            # Podziel tekst na zdania
+            zdania = re.split(r'(?<=[\.\!\?])\s+', new_text[przesuniecie:])
+            
+            if not zdania:
+                print(f"❌ [{idx}] ({plik}) Brak zdań do przeszukania")
+                nie_znalezione.append((plik, fraza))
+                continue
+
+            # Znajdź najlepsze dopasowanie
             match = process.extractOne(fraza, zdania, scorer=fuzz.partial_ratio)
 
             if match and match[1] >= prog:
@@ -91,14 +112,21 @@ def run():
                     przesuniecie = pos + len(numer) + len(najlepsze_dopasowanie)
                     print(f"✅ [{idx}] ({plik}) Separator przed: '{najlepsze_dopasowanie[:40]}...' ({match[1]:.1f}%)")
                     znalezione.append((plik, fraza, match[1]))
+                else:
+                    print(f"❌ [{idx}] ({plik}) Nie znaleziono pozycji dla: '{fraza}'")
+                    nie_znalezione.append((plik, fraza))
             else:
-                print(f"❌ [{idx}] ({plik}) Brak dopasowania >= {prog}% dla frazy: '{fraza}'")
+                score = match[1] if match else 0
+                print(f"❌ [{idx}] ({plik}) Brak dopasowania >= {prog}% dla frazy: '{fraza}' (najlepsze: {score:.1f}%)")
                 nie_znalezione.append((plik, fraza))
 
         # Podsumowanie
         print("\n📊 PODSUMOWANIE:")
+        print(f"✅ Znalezione dopasowania: {len(znalezione)}")
         for plik, fraza, score in znalezione:
             print(f"   ✅ {plik}: {fraza} ({score:.1f}%)")
+        
+        print(f"❌ Nie znalezione: {len(nie_znalezione)}")
         for plik, fraza in nie_znalezione:
             print(f"   ❌ {plik}: {fraza}")
 
@@ -111,8 +139,11 @@ def run():
         return tekst
 
     # 🔹 5. Wstawianie separatorów + poprawa myślników
-    text = wstaw_entery_z_fuzzy(text, frazy, prog=70)
-    text = popraw_myslniki(text)
+    if frazy:
+        text = wstaw_entery_z_fuzzy(text, frazy, prog=70)
+        text = popraw_myslniki(text)
+    else:
+        print("⚠️ Brak fraz do dopasowania!")
 
     # 🔹 6. Zapis wyniku
     OUTPUT_FILE = os.path.join(BASE_DIR, "z_enterami.txt")
