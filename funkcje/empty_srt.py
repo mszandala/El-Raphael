@@ -9,6 +9,7 @@ Generuje empty.srt w tym samym katalogu co ten moduł.
 
 import os
 import glob
+import re
 
 TEMP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "temp"))
 os.makedirs(TEMP_DIR, exist_ok=True)
@@ -41,11 +42,13 @@ def txt_to_srt(txt_file, srt_file):
             # spróbuj znaleźć dwie liczby (start, end) w linii
             tokens = line.split()
             floats = []
-            for t in tokens:
+            float_indices = []
+            for i, t in enumerate(tokens):
                 try:
                     floats.append(float(t.replace(',', '.')))
+                    float_indices.append(i)
                 except Exception:
-                    continue
+                    pass
                 if len(floats) == 2:
                     break
             if len(floats) < 2:
@@ -53,6 +56,26 @@ def txt_to_srt(txt_file, srt_file):
                 print(f"⚠️ Pomijam linię (nie znaleziono 2 liczb): {line}")
                 continue
             start, end = floats
+            # sprawdź, czy po dwóch liczbach jest etykieta (np. 'rozdzial 9')
+            label = ""
+            try:
+                last_idx = float_indices[1]
+                if last_idx + 1 < len(tokens):
+                    label = " ".join(tokens[last_idx+1:]).strip()
+            except Exception:
+                label = ""
+
+            if label:
+                # wzorce etykiet rozdziałów, można rozbudować
+                if re.match(r'^(rozdz|rozdzia[lł]|chapter|rozdz\.)\b', label, re.I):
+                    print(f"ℹ️ Pomijam etykietę rozdziału: {label}")
+                    continue
+                # jeśli etykieta jest tylko liczbą (np. '9') i najpierw było słowo 'rozdzial' w oryginale,
+                # zostawiamy już wykryte powyżej; ale można też pomijać same liczby jeśli trzeba
+                if re.match(r'^\d+$', label):
+                    # krótkie etykiety składające się tylko z numerów pomijamy
+                    print(f"ℹ️ Pomijam krótką etykietę/numer: {label}")
+                    continue
             # sanity check: end >= start
             if end < start:
                 print(f"⚠️ Uwaga: end < start w linii: {line} — przełączam miejscami.")
