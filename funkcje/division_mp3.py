@@ -63,7 +63,7 @@ def run():
             )
 
             words = result["text"].strip().split()
-            pierwsze_slowa = " ".join(words[:3]) if len(words) >= 7 else " ".join(words)
+            pierwsze_slowa = " ".join(words[:7]) if len(words) >= 7 else " ".join(words)
 
             if pierwsze_slowa:
                 print(f"🔎 [{idx}] Znalezione pierwsze słowa: {pierwsze_slowa}")
@@ -140,7 +140,7 @@ def run():
 
     # 🔹 5. Wstawianie separatorów + poprawa myślników
     if frazy:
-        text = wstaw_entery_z_fuzzy(text, frazy, prog=70)
+        text = wstaw_entery_z_fuzzy(text, frazy, prog=50)
         text = popraw_myslniki(text)
     else:
         print("⚠️ Brak fraz do dopasowania!")
