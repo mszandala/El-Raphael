@@ -51,7 +51,7 @@ def run():
             temp_file = os.path.join(BASE_DIR, f"cut_{idx}_{nazwa}")
             
             # Przetnij audio i zapisz
-            przytnij_do_poczatku(mp3, 5).export(temp_file, format="mp3")
+            przytnij_do_poczatku(mp3, 8).export(temp_file, format="mp3")
 
             # Transkrypcja
             result = model.transcribe(
@@ -63,7 +63,7 @@ def run():
             )
 
             words = result.get("text", "").strip().split()
-            pierwsze_slowa = " ".join(words[:3]) if len(words) >= 3 else " ".join(words)
+            pierwsze_slowa = " ".join(words[:3]) if words else ""
 
             if pierwsze_slowa:
                 print(f"🔎 [{idx}] Znalezione pierwsze słowa: {pierwsze_slowa}")
