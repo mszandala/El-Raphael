@@ -62,8 +62,8 @@ def run():
                 condition_on_previous_text=False
             )
 
-            words = result["text"].strip().split()
-            pierwsze_slowa = " ".join(words[:3]) if len(words) >= 7 else " ".join(words)
+            words = result.get("text", "").strip().split()
+            pierwsze_slowa = " ".join(words[:3]) if words else ""
 
             if pierwsze_slowa:
                 print(f"🔎 [{idx}] Znalezione pierwsze słowa: {pierwsze_slowa}")
