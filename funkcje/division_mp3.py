@@ -62,8 +62,32 @@ def run():
                 condition_on_previous_text=False
             )
 
-            words = result.get("text", "").strip().split()
-            pierwsze_slowa = " ".join(words[:3]) if len(words) >= 3 else " ".join(words)
+            raw = result.get("text", "")
+            words = raw.strip().split()
+            pierwsze_slowa = " ".join(words[:3]) if words else ""
+            print(f"RAW TRANSCRIPT [{idx}]: {raw!r}")
+            print(f"WORDS [{idx}]: {words[:10]} (len={len(words)})")
+            print(f"PIERWSZE_SLOWA [{idx}]: '{pierwsze_slowa}'")
+
+            # porównanie z top 3 zdań (surowe i znormalizowane)
+            def normalize(s):
+                import unicodedata, re
+                s = (s or "").lower()
+                s = unicodedata.normalize("NFKD", s)
+                s = "".join(ch for ch in s if not unicodedata.combining(ch))
+                s = re.sub(r"[^\\w\\s]", "", s)
+                s = re.sub(r"\\s+", " ", s).strip()
+                return s
+
+            fraza_norm = normalize(pierwsze_slowa)
+            zdania = re.split(r'(?<=[\\.\\!\\?])\\s+', text)
+            zdania_norm = [normalize(z) for z in zdania]
+            # wypisz top 3 surowe
+            from rapidfuzz import fuzz, process
+            top_raw = process.extract(pierwsze_slowa, zdania, limit=3, scorer=fuzz.partial_ratio)
+            top_norm = process.extract(fraza_norm, zdania_norm, limit=3, scorer=fuzz.token_set_ratio)
+            print("TOP_RAW:", top_raw)
+            print("TOP_NORM:", top_norm)
 
             if pierwsze_slowa:
                 print(f"🔎 [{idx}] Znalezione pierwsze słowa: {pierwsze_slowa}")
