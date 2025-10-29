@@ -9,6 +9,7 @@ Generuje empty.srt w tym samym katalogu co ten moduł.
 
 import os
 import glob
+import re
 
 TEMP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "temp"))
 os.makedirs(TEMP_DIR, exist_ok=True)
@@ -41,11 +42,13 @@ def txt_to_srt(txt_file, srt_file):
             # spróbuj znaleźć dwie liczby (start, end) w linii
             tokens = line.split()
             floats = []
-            for t in tokens:
+            float_indices = []
+            for i, t in enumerate(tokens):
                 try:
                     floats.append(float(t.replace(',', '.')))
+                    float_indices.append(i)
                 except Exception:
-                    continue
+                    pass
                 if len(floats) == 2:
                     break
             if len(floats) < 2:
@@ -53,6 +56,9 @@ def txt_to_srt(txt_file, srt_file):
                 print(f"⚠️ Pomijam linię (nie znaleziono 2 liczb): {line}")
                 continue
             start, end = floats
+            # Nie pomijamy etykiet ani opisu — każda linia posiadająca dwie liczby
+            # (start i end) będzie zapisana jako pusty wpis SRT. Tekst po liczbach
+            # jest ignorowany przy tworzeniu napisu.
             # sanity check: end >= start
             if end < start:
                 print(f"⚠️ Uwaga: end < start w linii: {line} — przełączam miejscami.")
