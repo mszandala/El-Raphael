@@ -51,7 +51,7 @@ def run():
             temp_file = os.path.join(BASE_DIR, f"cut_{idx}_{nazwa}")
             
             # Przetnij audio i zapisz
-            przytnij_do_poczatku(mp3, 5).export(temp_file, format="mp3")
+            przytnij_do_poczatku(mp3, 8).export(temp_file, format="mp3")
 
             # Transkrypcja
             result = model.transcribe(
@@ -63,7 +63,7 @@ def run():
             )
 
             words = result["text"].strip().split()
-            pierwsze_slowa = " ".join(words[:3]) if len(words) >= 3 else " ".join(words)
+            pierwsze_slowa = " ".join(words[:3]) if len(words) >= 7 else " ".join(words)
 
             if pierwsze_slowa:
                 print(f"🔎 [{idx}] Znalezione pierwsze słowa: {pierwsze_slowa}")
@@ -82,7 +82,7 @@ def run():
     print(f"\n📋 Podsumowanie transkrypcji: znaleziono {len(frazy)} fraz z {len(mp3_files)} plików")
 
     # 🔧 Funkcja wstawiająca entery z fuzzy matching
-    def wstaw_entery_z_fuzzy(text, frazy, prog=70):
+    def wstaw_entery_z_fuzzy(text, frazy, prog=50):
         znalezione, nie_znalezione = [], []
         new_text = text
         przesuniecie = 0
