@@ -5,6 +5,14 @@ import whisper
 from fuzzywuzzy import fuzz
 from fuzzywuzzy import process
 
+# Użyj rapidfuzz zamiast fuzzywuzzy
+try:
+    from rapidfuzz import fuzz, process
+except ImportError:
+    print("📦 Instaluję rapidfuzz...")
+    os.system("pip install rapidfuzz")
+    from rapidfuzz import fuzz, process 
+
 def run():
     # Ścieżki
     temp_folder = "temp"
