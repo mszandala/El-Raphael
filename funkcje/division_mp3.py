@@ -43,7 +43,7 @@ def run():
     print()
     
     # Funkcja do przycięcia audio do pierwszych sekund
-    def przytnij_do_poczatku(file_path, sekundy=10):  # zwiększone z 5 do 10 sekund
+    def przytnij_do_poczatku(file_path, sekundy=5):  # zmienione z 10 na 5 sekund
         audio = AudioSegment.from_file(file_path)
         return audio[:sekundy * 1000]
     
@@ -53,8 +53,8 @@ def run():
         mp3_path = os.path.join(mp3_folder, mp3_file)
         print(f"🎧 [{i}] Przetwarzam początek nagrania: {mp3_file}")
         
-        # Przytnij do pierwszych 10 sekund
-        audio_segment = przytnij_do_poczatku(mp3_path)
+        # Przytnij do pierwszych 5 sekund
+        audio_segment = przytnij_do_poczatku(mp3_path, 5)
         
         # Zapisz tymczasowo przycięty fragment
         temp_audio_path = os.path.join(temp_folder, "temp_audio.wav")
@@ -62,7 +62,11 @@ def run():
         
         # Transkrypcja z Whisper
         result = model.transcribe(temp_audio_path, language="pl")
-        fraza = result["text"].strip()
+        fraza_pelna = result["text"].strip()
+        
+        # Weź tylko pierwsze 4 słowa
+        slowa = fraza_pelna.split()
+        fraza = ' '.join(slowa[:4])  # tylko pierwsze 4 słowa
         
         print(f"🔎 [{i}] Znalezione pierwsze słowa: {fraza}")
         
@@ -78,7 +82,7 @@ def run():
     print(f"\n📋 Podsumowanie transkrypcji: znaleziono {len(frazy)} fraz z {len(mp3_files)} plików")
     
     # Funkcja do wstawiania enterów z fuzzy matching
-    def wstaw_entery_z_fuzzy(text, frazy, prog=75):  # zwiększony próg z 50 do 75
+    def wstaw_entery_z_fuzzy(text, frazy, prog=70):  # zmienione z 75 na 70
         znalezione, nie_znalezione = [], []
         new_text = text
         przesuniecie = 0
@@ -87,31 +91,45 @@ def run():
             fraza = item["fraza"].strip()
             plik = item["plik"]
             
-            # Normalizacja dla lepszego dopasowania
-            fraza_norm = ' '.join(fraza.lower().split())
+            # Najpierw sprawdź dokładne dopasowanie
+            fraza_lower = fraza.lower()
+            text_fragment = new_text[przesuniecie:].lower()
             
-            # Szukaj w fragmentach tekstu
-            pozostaly_tekst = new_text[przesuniecie:].lower()
-            najlepsza_pozycja = -1
+            # Szukaj dokładnego dopasowania
+            pos = text_fragment.find(fraza_lower)
+            if pos != -1:
+                pozycja = pos + przesuniecie
+                separator = f"\n\n\n[{idx}] >>>>>>>>>>>>>>>\n\n"
+                new_text = new_text[:pozycja] + separator + new_text[pozycja:]
+                przesuniecie = pozycja + len(separator)
+                print(f"✅ [DOKŁADNE] [{idx}] ({plik}) Separator wstawiony na pozycji {pozycja}")
+                znalezione.append((plik, fraza, 100.0))
+                continue
+            
+            # Jeśli nie ma dokładnego, użyj fuzzy matching na początku każdego akapitu
+            akapity = text_fragment.split('\n\n')
             najlepszy_score = 0
+            najlepsza_pozycja = -1
             
-            # Przeszukuj tekst fragment po fragmencie
-            for i in range(0, len(pozostaly_tekst) - len(fraza_norm), 10):
-                fragment = pozostaly_tekst[i:i + len(fraza_norm) + 50]
-                score = fuzz.partial_ratio(fraza_norm, fragment)
+            current_pos = przesuniecie
+            for akapit in akapity:
+                if len(akapit.strip()) > 0:
+                    # Sprawdź pierwsze 100 znaków akapitu
+                    fragment = akapit[:100].strip()
+                    score = fuzz.partial_ratio(fraza_lower, fragment)
+                    
+                    if score > najlepszy_score:
+                        najlepszy_score = score
+                        najlepsza_pozycja = current_pos
                 
-                if score > najlepszy_score:
-                    najlepszy_score = score
-                    najlepsza_pozycja = i + przesuniecie
+                current_pos += len(akapit) + 2  # +2 za \n\n
 
             if najlepszy_score >= prog:
-                # TYLKO WSTAW SEPARATOR - nie zmieniaj tekstu!
                 separator = f"\n\n\n[{idx}] >>>>>>>>>>>>>>>\n\n"
                 new_text = new_text[:najlepsza_pozycja] + separator + new_text[najlepsza_pozycja:]
                 przesuniecie = najlepsza_pozycja + len(separator)
-                
+                print(f"✅ [FUZZY] [{idx}] ({plik}) Separator wstawiony ({najlepszy_score:.1f}%)")
                 znalezione.append((plik, fraza, najlepszy_score))
-                print(f"✅ [{idx}] ({plik}) Separator wstawiony ({najlepszy_score:.1f}%)")
             else:
                 nie_znalezione.append((plik, fraza))
                 print(f"❌ [{idx}] ({plik}) Brak dopasowania >= {prog}% dla: '{fraza}' (najlepsze: {najlepszy_score:.1f}%)")
