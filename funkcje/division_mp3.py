@@ -79,62 +79,125 @@ def run():
             
         return text
     
-    # 🔧 Funkcja do lepszego znajdowania pozycji
+    # 🔧 Znacznie ulepszona funkcja do znajdowania pozycji
     def find_better_position(text, rough_position, search_phrase):
-        """Znajdź lepszą pozycję dla separatora - na początku zdania lub przed myślnikiem"""
+        """Znajdź lepszą pozycję dla separatora - zawsze na początku słowa/zdania"""
+        
         # Sprawdź kilka pozycji wokół rough_position
-        search_range = 50  # sprawdź 50 znaków przed i po
+        search_range = 100  # zwiększony zakres
         start = max(0, rough_position - search_range)
         end = min(len(text), rough_position + search_range)
         
         fragment = text[start:end]
-        search_phrase_lower = search_phrase.lower()
+        search_phrase_lower = search_phrase.lower().strip()
         
-        # Szukaj pierwszego słowa frazy w fragmencie
+        # Szukaj dokładnej frazy w fragmencie
+        phrase_pos = fragment.lower().find(search_phrase_lower)
+        if phrase_pos != -1:
+            exact_pos = start + phrase_pos
+            # Sprawdź czy to początek słowa
+            if exact_pos == 0 or not text[exact_pos-1].isalnum():
+                return exact_pos
+        
+        # Jeśli nie ma dokładnej frazy, szukaj pierwszego słowa
         pierwsze_slowo = search_phrase_lower.split()[0] if search_phrase_lower.split() else ""
-        if not pierwsze_slowo:
+        if not pierwsze_slowo or len(pierwsze_slowo) < 3:
             return rough_position
-            
-        # Znajdź wszystkie wystąpienia pierwszego słowa
+        
+        # Znajdź wszystkie wystąpienia pierwszego słowa w fragmencie
         word_positions = []
         pos = 0
         while True:
             pos = fragment.lower().find(pierwsze_slowo, pos)
             if pos == -1:
                 break
-            word_positions.append(start + pos)
+            
+            absolute_pos = start + pos
+            
+            # ✅ KLUCZOWE: Sprawdź czy to POCZĄTEK słowa
+            is_word_start = (absolute_pos == 0 or 
+                            not text[absolute_pos-1].isalnum() or
+                            text[absolute_pos-1] in ' \n\t—.!?')
+            
+            # ✅ KLUCZOWE: Sprawdź czy to NIE jest środek słowa
+            is_not_word_middle = True
+            if absolute_pos > 0 and absolute_pos < len(text) - 1:
+                prev_char = text[absolute_pos-1]
+                next_char = text[absolute_pos + len(pierwsze_slowo)]
+                # Jeśli poprzedni i następny znak to litery - to środek słowa
+                if prev_char.isalnum() and next_char.isalnum():
+                    is_not_word_middle = False
+            
+            if is_word_start and is_not_word_middle:
+                word_positions.append(absolute_pos)
+                
             pos += 1
         
-        # Znajdź najlepszą pozycję - preferuj te na początku zdania lub po myślniku
-        best_pos = rough_position
+        if not word_positions:
+            # Jeśli nie znaleziono dobrej pozycji, znajdź najbliższą granicę słowa
+            return find_nearest_word_boundary(text, rough_position)
+        
+        # Znajdź najlepszą pozycję z preferencjami
+        best_pos = word_positions[0]
         best_score = -1
         
         for word_pos in word_positions:
             score = 0
             
-            # Sprawdź co jest przed słowem
+            # Sprawdź co jest przed pozycją
             if word_pos == 0:
-                score += 10  # początek tekstu
+                score += 100  # początek tekstu
             elif word_pos > 0:
                 before_char = text[word_pos-1]
-                if before_char in '.!?':
-                    score += 20  # po końcu zdania
+                if before_char == '\n' and word_pos > 1 and text[word_pos-2] == '\n':
+                    score += 90  # nowy akapit
+                elif before_char == '—' or (word_pos > 1 and text[word_pos-2:word_pos] == '— '):
+                    score += 80  # początek dialogu
+                elif before_char in '.!?':
+                    score += 70  # po końcu zdania
                 elif before_char == '\n':
-                    score += 15  # nowa linia
-                elif before_char == ' ' and word_pos > 1 and text[word_pos-2] == '—':
-                    score += 25  # po myślniku (dialog)
+                    score += 60  # nowa linia
                 elif before_char == ' ':
-                    score += 5   # po spacji
+                    score += 30  # po spacji
             
-            # Sprawdź czy to nie środek słowa
-            if word_pos > 0 and text[word_pos-1].isalnum():
-                score -= 50  # kara za środek słowa
-                
+            # Preferuj pozycje bliższe oryginalnemu rough_position
+            distance = abs(word_pos - rough_position)
+            if distance <= 20:
+                score += 20
+            elif distance <= 50:
+                score += 10
+            
             if score > best_score:
                 best_score = score
                 best_pos = word_pos
         
         return best_pos
+    
+    # 🔧 NOWA funkcja pomocnicza
+    def find_nearest_word_boundary(text, position):
+        """Znajdź najbliższą granicę słowa (początek lub koniec)"""
+        
+        # Sprawdź czy jesteśmy już na granicy słowa
+        if position == 0 or position >= len(text):
+            return max(0, min(position, len(text) - 1))
+        
+        if not text[position-1].isalnum() or not text[position].isalnum():
+            return position
+        
+        # Szukaj w obu kierunkach
+        left_boundary = position
+        while left_boundary > 0 and text[left_boundary-1].isalnum():
+            left_boundary -= 1
+        
+        right_boundary = position
+        while right_boundary < len(text) and text[right_boundary].isalnum():
+            right_boundary += 1
+        
+        # Wybierz bliższą granicę
+        if position - left_boundary <= right_boundary - position:
+            return left_boundary
+        else:
+            return right_boundary
     
     # Analizuj każdy plik MP3
     frazy = []
