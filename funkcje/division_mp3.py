@@ -389,4 +389,23 @@ def run():
     print(f"✅ Znalezione dopasowania: {len(znalezione)}/{len(frazy)} ({len(znalezione)*100//len(frazy)}%)")
     
     if znalezione:
-        print(f"\n✅ ZNALEZIONE ({len(znalezien
+        print(f"\n✅ ZNALEZIONE ({len(znalezione)}):")
+        for plik, fraza, score in znalezione:
+            icon = "🎯" if score >= 90 else "✅"
+            print(f"   {icon} {plik}: {fraza[:60]}... ({score:.1f}%)")
+    
+    if nie_znalezione:
+        print(f"\n❌ NIE ZNALEZIONE ({len(nie_znalezione)}):")
+        for plik, fraza, score in nie_znalezione:
+            print(f"   ❌ {plik}: {fraza[:60]}... (najlepsze: {score:.1f}%)")
+    
+    # Zapisz wynik
+    output_path = os.path.join(temp_folder, "z_enterami.txt")
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(new_text)
+    
+    print(f"\n✅ Gotowe! Wynik zapisano do: {output_path}")
+    print(f"{'='*80}")
+
+if __name__ == "__main__":
+    run()
