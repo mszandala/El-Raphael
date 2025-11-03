@@ -71,7 +71,9 @@ def run():
             'ibleś': 'iblis',
             'iblis': 'iblis',
             'chams': 'chamis',
-            'staś': 'stas'
+            'staś': 'stas',
+            'nalektura': 'nel',
+            'aydryz': 'idrys',
         }
         
         for wrong, correct in replacements.items():
@@ -79,79 +81,106 @@ def run():
             
         return text
     
-    # 🔧 NOWA FUNKCJA - znajduje frazę w oryginalnym tekście
-    def find_phrase_in_original_text(original_text, search_phrase, start_offset=0, threshold=70):
+    # 🔧 NOWA ULEPSZONA FUNKCJA - sliding window z fuzzy matching
+    def find_phrase_with_sliding_window(original_text, search_phrase, start_offset=0, threshold=50):
         """
-        Znajduje frazę w oryginalnym tekście (NIE znormalizowanym).
-        Zwraca pozycję POCZĄTKU pierwszego słowa frazy.
+        Znajduje frazę używając sliding window i fuzzy matching.
+        Zwraca (pozycja_w_oryginalnym_tekście, score) lub (None, 0).
         """
-        # Najpierw spróbuj dokładnego dopasowania (case-insensitive)
-        search_lower = search_phrase.lower()
-        text_from_offset = original_text[start_offset:]
-        
-        # Szukaj dokładnej frazy
-        pos = text_from_offset.lower().find(search_lower)
-        if pos != -1:
-            absolute_pos = start_offset + pos
-            # Sprawdź czy to początek słowa
-            if absolute_pos == 0 or not original_text[absolute_pos-1].isalnum():
-                return absolute_pos, 100.0
-        
-        # Jeśli nie znaleziono dokładnie, użyj fuzzy matching
-        phrase_norm = normalize_for_matching(search_phrase)
-        first_word = phrase_norm.split()[0] if phrase_norm.split() else ""
-        
-        if not first_word or len(first_word) < 3:
+        if not search_phrase or len(search_phrase) < 3:
             return None, 0
+        
+        # Normalizuj frazę do wyszukiwania
+        phrase_norm = normalize_for_matching(search_phrase)
+        phrase_words = phrase_norm.split()
+        
+        if not phrase_words:
+            return None, 0
+        
+        # Parametry sliding window
+        window_size = len(search_phrase) * 3  # Okno 3x większe niż fraza
+        step_size = 20  # Krok co 20 znaków
         
         best_pos = None
         best_score = 0
+        best_match_info = ""
         
-        # Szukaj pierwszego słowa w tekście
+        # Iteruj po tekście od start_offset
         search_text = original_text[start_offset:]
-        pos = 0
         
-        while pos < len(search_text):
-            # Znajdź następne wystąpienie pierwszej litery pierwszego słowa
-            char_pos = search_text[pos:].lower().find(first_word[0])
-            if char_pos == -1:
-                break
+        for i in range(0, len(search_text) - window_size, step_size):
+            # Wyciągnij fragment
+            window = search_text[i:i + window_size]
+            window_norm = normalize_for_matching(window)
             
-            pos += char_pos
-            absolute_pos = start_offset + pos
+            # Oblicz podobieństwo
+            score = fuzz.partial_ratio(phrase_norm, window_norm)
             
-            # Sprawdź czy to początek słowa
-            if absolute_pos > 0 and original_text[absolute_pos-1].isalnum():
-                pos += 1
-                continue
+            # Dodatkowe punkty jeśli pierwsze słowo frazy jest w oknie
+            if phrase_words and phrase_words[0] in window_norm.split():
+                score = min(100, score + 10)
             
-            # Wyciągnij fragment tekstu dla porównania
-            fragment_len = max(len(search_phrase) * 3, 300)
-            fragment = original_text[absolute_pos:absolute_pos + fragment_len]
-            
-            # Oblicz podobieństwo na znormalizowanych tekstach
-            fragment_norm = normalize_for_matching(fragment)
-            score = fuzz.partial_ratio(phrase_norm, fragment_norm)
-            
-            # Dodatkowy bonus jeśli pierwsze słowo dokładnie pasuje
-            fragment_words = fragment_norm.split()
-            if fragment_words and fragment_words[0] == first_word:
-                score = min(100, score + 15)
-            
+            # Sprawdź czy to lepsze dopasowanie
             if score > best_score:
                 best_score = score
-                best_pos = absolute_pos
+                # Znajdź dokładną pozycję pierwszego słowa w oryginalnym oknie
+                first_word_pos = find_first_word_position_in_window(window, phrase_words[0])
+                if first_word_pos is not None:
+                    best_pos = start_offset + i + first_word_pos
+                else:
+                    best_pos = start_offset + i
+                
+                best_match_info = window[:100]
                 
                 # Jeśli znaleziono bardzo dobre dopasowanie, przestań szukać
                 if score >= 95:
                     break
-            
-            pos += 1
+        
+        # Debugowanie
+        if best_score >= threshold:
+            print(f"   🎯 Najlepsze dopasowanie ({best_score:.1f}%): '{best_match_info[:50]}...'")
         
         if best_score >= threshold:
             return best_pos, best_score
         
-        return None, 0
+        return None, best_score
+    
+    # Pomocnicza funkcja do znajdowania pozycji pierwszego słowa
+    def find_first_word_position_in_window(window, first_word_norm):
+        """
+        Znajduje pozycję pierwszego słowa (znormalizowanego) w oknie (oryginalnym).
+        Zwraca pozycję w oryginalnym oknie lub None.
+        """
+        # Normalizuj okno i znajdź pozycję pierwszego słowa
+        window_norm = normalize_for_matching(window)
+        words_norm = window_norm.split()
+        
+        if first_word_norm not in words_norm:
+            return None
+        
+        # Znajdź indeks słowa w znormalizowanym tekście
+        word_index = words_norm.index(first_word_norm)
+        
+        # Teraz znajdź odpowiednią pozycję w oryginalnym oknie
+        # Liczymy ile słów jest przed tym słowem
+        words_before = word_index
+        
+        # Przechodzimy przez oryginalne okno szukając n-tego słowa
+        current_word = 0
+        in_word = False
+        
+        for i, char in enumerate(window):
+            if char.isalnum() and not in_word:
+                # Początek nowego słowa
+                if current_word == words_before:
+                    return i
+                in_word = True
+            elif not char.isalnum() and in_word:
+                # Koniec słowa
+                current_word += 1
+                in_word = False
+        
+        return None
     
     # 🔧 POPRAWIONA FUNKCJA - znajduje najlepsze miejsce na separator
     def find_best_separator_position(text, phrase_position):
@@ -163,7 +192,7 @@ def run():
             return 0
         
         # Sprawdź różne pozycje wstecz od phrase_position
-        search_back = min(150, phrase_position)
+        search_back = min(200, phrase_position)  # Zwiększone z 150 na 200
         start = phrase_position - search_back
         
         best_pos = phrase_position
@@ -196,20 +225,22 @@ def run():
             elif char == '\n':
                 score = 70
             # Po spacji (początek słowa)
-            elif char == ' ' and (i >= len(text) or text[i].isalnum()):
+            elif char == ' ' and (i < len(text) and text[i].isalnum()):
                 score = 50
             # Początek słowa bez spacji
-            elif not char.isalnum() and (i >= len(text) or text[i].isalnum()):
+            elif not char.isalnum() and (i < len(text) and text[i].isalnum()):
                 score = 40
             
-            # Preferuj pozycje bliżej frazy
+            # Preferuj pozycje bliżej frazy (ale nie za bardzo)
             distance = phrase_position - i
-            if distance <= 10:
-                score += 20
-            elif distance <= 30:
-                score += 10
+            if distance <= 5:
+                score += 25  # Bardzo blisko
+            elif distance <= 20:
+                score += 15  # Blisko
             elif distance <= 50:
-                score += 5
+                score += 10  # Średnio
+            elif distance <= 100:
+                score += 5   # Daleko
             
             if score > best_score:
                 best_score = score
@@ -240,7 +271,7 @@ def run():
         
         # Weź więcej słów z transkrypcji dla lepszego dopasowania
         slowa = fraza_pelna.split()
-        fraza = ' '.join(slowa[:6])  # zwiększone z 4 do 6 słów
+        fraza = ' '.join(slowa[:8])  # zwiększone z 6 do 8 słów
         
         # Wyświetl pełną transkrypcję dla debugowania
         print(f"🔎 [{i}] Pełna transkrypcja: {fraza_pelna}")
@@ -258,7 +289,7 @@ def run():
     print(f"\n📋 Podsumowanie transkrypcji: znaleziono {len(frazy)} fraz z {len(mp3_files)} plików")
     
     # 🔧 CAŁKOWICIE PRZEPISANA funkcja wstawiania enterów
-    def wstaw_entery_z_fuzzy(text, frazy, prog=60):
+    def wstaw_entery_z_fuzzy(text, frazy, prog=50):  # Obniżony próg z 60 do 50
         """
         Wstawia separatory w tekście na podstawie znalezionych fraz.
         Zawsze wstawia separator PRZED pierwszym słowem frazy.
@@ -272,12 +303,14 @@ def run():
             fraza = item["fraza"].strip()
             plik = item["plik"]
             
+            print(f"\n🔍 [{idx}] Szukam: '{fraza[:50]}...'")
+            
             # Znajdź frazę w oryginalnym tekście (z uwzględnieniem offset)
-            phrase_pos, score = find_phrase_in_original_text(new_text, fraza, offset, threshold=prog)
+            phrase_pos, score = find_phrase_with_sliding_window(new_text, fraza, offset, threshold=prog)
             
             if phrase_pos is None:
                 print(f"❌ [{idx}] ({plik}) Brak dopasowania >= {prog}% dla: '{fraza}' (najlepsze: {score:.1f}%)")
-                nie_znalezione.append((plik, fraza))
+                nie_znalezione.append((plik, fraza, score))
                 continue
             
             # Znajdź najlepsze miejsce na separator (przed frazą)
@@ -291,8 +324,8 @@ def run():
             offset = separator_pos + len(separator)
             
             # Wyświetl informację o dopasowaniu
-            match_type = "DOKŁADNE" if score == 100.0 else "FUZZY"
-            print(f"✅ [{match_type}] [{idx}] ({plik}) '{fraza}' ({score:.1f}%)")
+            match_type = "DOKŁADNE" if score >= 95 else "FUZZY"
+            print(f"✅ [{match_type}] [{idx}] ({plik}) '{fraza[:40]}...' ({score:.1f}%)")
             znalezione.append((plik, fraza, score))
         
         return new_text, znalezione, nie_znalezione
@@ -301,15 +334,20 @@ def run():
     new_text, znalezione, nie_znalezione = wstaw_entery_z_fuzzy(text, frazy)
     
     # Podsumowanie
-    print(f"\n📊 PODSUMOWANIE:")
-    print(f"✅ Znalezione dopasowania: {len(znalezione)}")
-    for plik, fraza, score in znalezione:
-        print(f"   ✅ {plik}: {fraza} ({score:.1f}%)")
+    print(f"\n{'='*80}")
+    print(f"📊 PODSUMOWANIE:")
+    print(f"✅ Znalezione dopasowania: {len(znalezione)}/{len(frazy)} ({len(znalezione)*100//len(frazy)}%)")
+    
+    if znalezione:
+        print(f"\n✅ ZNALEZIONE ({len(znalezione)}):")
+        for plik, fraza, score in znalezione:
+            icon = "🎯" if score >= 90 else "✅"
+            print(f"   {icon} {plik}: {fraza[:60]}... ({score:.1f}%)")
     
     if nie_znalezione:
-        print(f"❌ Nie znalezione: {len(nie_znalezione)}")
-        for plik, fraza in nie_znalezione:
-            print(f"   ❌ {plik}: {fraza}")
+        print(f"\n❌ NIE ZNALEZIONE ({len(nie_znalezione)}):")
+        for plik, fraza, score in nie_znalezione:
+            print(f"   ❌ {plik}: {fraza[:60]}... (najlepsze: {score:.1f}%)")
     
     # Zapisz wynik
     output_path = os.path.join(temp_folder, "z_enterami.txt")
@@ -317,6 +355,7 @@ def run():
         f.write(new_text)
     
     print(f"\n✅ Gotowe! Wynik zapisano do: {output_path}")
+    print(f"{'='*80}")
 
 if __name__ == "__main__":
     run()
