@@ -1,7 +1,11 @@
 import os
 import re
+import warnings
 from pydub import AudioSegment
 import whisper
+
+# Wycisz ostrzeżenia FP16
+warnings.filterwarnings("ignore", message="FP16 is not supported on CPU")
 
 # Użyj rapidfuzz zamiast fuzzywuzzy
 try:
@@ -12,6 +16,9 @@ except ImportError:
     from rapidfuzz import fuzz, process 
 
 def run():
+    # Wycisz ostrzeżenia na początku
+    warnings.filterwarnings("ignore", message="FP16 is not supported on CPU")
+    
     # Ścieżki
     temp_folder = "temp"
     mp3_folder = os.path.join(temp_folder, "mp3")
@@ -43,9 +50,46 @@ def run():
     print()
     
     # Funkcja do przycięcia audio do pierwszych sekund
-    def przytnij_do_poczatku(file_path, sekundy=5):
+    def przytnij_do_poczatku(file_path, sekundy=8):  # zwiększone z 5 do 8 sekund
         audio = AudioSegment.from_file(file_path)
         return audio[:sekundy * 1000]
+    
+    # Funkcja normalizacji z tolerancją błędów
+    def normalize_for_matching(text):
+        """Normalizuje tekst z tolerancją na częste błędy transkrypcji"""
+        text = text.lower()
+        # Usuń znaki interpunkcyjne
+        text = re.sub(r'[^\w\s]', ' ', text)
+        # Usuń wielokrotne spacje
+        text = re.sub(r'\s+', ' ', text).strip()
+        
+        # Popraw częste błędy transkrypcji
+        replacements = {
+            'idry': 'idrys',
+            'sudańczycy': 'sudańczycy',
+            'gebhr': 'gebr',
+            'ibleś': 'iblis',
+            'iblis': 'iblis',
+            'chams': 'chamis',
+            'staś': 'stas'
+        }
+        
+        for wrong, correct in replacements.items():
+            text = text.replace(wrong, correct)
+            
+        return text
+    
+    # Funkcja do znajdowania początku słowa
+    def find_word_start(text, rough_position):
+        """Znajdź początek słowa w pobliżu pozycji"""
+        if rough_position == 0 or not text[rough_position-1].isalnum():
+            return rough_position
+            
+        pos = rough_position
+        while pos > 0 and text[pos-1].isalnum():
+            pos -= 1
+            
+        return pos
     
     # Analizuj każdy plik MP3
     frazy = []
@@ -53,8 +97,8 @@ def run():
         mp3_path = os.path.join(mp3_folder, mp3_file)
         print(f"🎧 [{i}] Przetwarzam początek nagrania: {mp3_file}")
         
-        # Przytnij do pierwszych 5 sekund
-        audio_segment = przytnij_do_poczatku(mp3_path, 5)
+        # Przytnij do pierwszych 8 sekund
+        audio_segment = przytnij_do_poczatku(mp3_path, 8)
         
         # Zapisz tymczasowo przycięty fragment
         temp_audio_path = os.path.join(temp_folder, "temp_audio.wav")
@@ -64,11 +108,13 @@ def run():
         result = model.transcribe(temp_audio_path, language="pl")
         fraza_pelna = result["text"].strip()
         
-        # Weź tylko pierwsze 4 słowa
+        # Weź więcej słów z transkrypcji dla lepszego dopasowania
         slowa = fraza_pelna.split()
-        fraza = ' '.join(slowa[:4])  # tylko pierwsze 4 słowa
+        fraza = ' '.join(slowa[:6])  # zwiększone z 4 do 6 słów
         
-        print(f"🔎 [{i}] Znalezione pierwsze słowa: {fraza}")
+        # Wyświetl pełną transkrypcję dla debugowania
+        print(f"🔎 [{i}] Pełna transkrypcja: {fraza_pelna}")
+        print(f"🔎 [{i}] Używana fraza: {fraza}")
         
         frazy.append({
             "plik": mp3_file,
@@ -81,136 +127,77 @@ def run():
     
     print(f"\n📋 Podsumowanie transkrypcji: znaleziono {len(frazy)} fraz z {len(mp3_files)} plików")
     
-    # Funkcja pomocnicza do znajdowania rzeczywistej pozycji
-    def find_real_position(original_text, norm_pos):
-        # Uproszczona wersja - po prostu zwróć przybliżoną pozycję
-        return min(norm_pos, len(original_text) - 1)
-    
     # Funkcja do wstawiania enterów z fuzzy matching
-    def wstaw_entery_z_fuzzy(text, frazy, prog=65):
+    def wstaw_entery_z_fuzzy(text, frazy, prog=50):  # zmniejszony próg z 65 na 50
         znalezione, nie_znalezione = [], []
         new_text = text
         przesuniecie = 0
-
-        # Funkcja normalizacji tekstu
-        def normalize_text(txt):
-            # Usuń znaki interpunkcyjne, zmień na małe litery, usuń wielokrotne spacje
-            txt = re.sub(r'[^\w\s]', ' ', txt.lower())
-            txt = re.sub(r'\s+', ' ', txt.strip())
-            return txt
-
-        # 🔧 NOWA funkcja do znajdowania początku słowa
-        def find_word_start(text, rough_position):
-            """Znajdź początek słowa w pobliżu pozycji"""
-            # Sprawdź czy jesteśmy na początku słowa
-            if rough_position == 0 or not text[rough_position-1].isalnum():
-                return rough_position
-                
-            # Cofnij się do początku słowa
-            pos = rough_position
-            while pos > 0 and text[pos-1].isalnum():
-                pos -= 1
-                
-            return pos
 
         for idx, item in enumerate(frazy, start=1):
             fraza = item["fraza"].strip()
             plik = item["plik"]
             
-            # Normalizuj frazę
-            fraza_norm = normalize_text(fraza)
-            
-            # Najpierw sprawdź dokładne dopasowanie
+            # Najpierw sprawdź dokładne dopasowanie (case-insensitive)
             text_fragment = new_text[przesuniecie:].lower()
-            pos = text_fragment.find(fraza.lower())
+            fraza_lower = fraza.lower()
+            pos = text_fragment.find(fraza_lower)
+            
             if pos != -1:
                 pozycja = pos + przesuniecie
-                # 🔧 Znajdź początek słowa
+                # Znajdź początek słowa
                 pozycja = find_word_start(new_text, pozycja)
                 separator = f"\n\n\n[{idx}] >>>>>>>>>>>>>>>\n\n"
                 new_text = new_text[:pozycja] + separator + new_text[pozycja:]
                 przesuniecie = pozycja + len(separator)
-                print(f"✅ [DOKŁADNE] [{idx}] ({plik}) Separator wstawiony na pozycji {pozycja}")
+                print(f"✅ [DOKŁADNE] [{idx}] ({plik}) '{fraza}' (100.0%)")
                 znalezione.append((plik, fraza, 100.0))
                 continue
             
-            # 🔧 NOWA METODA: Szukaj w całym tekście po fragmentach
-            pozostaly_tekst = new_text[przesuniecie:]
-            text_norm = normalize_text(pozostaly_tekst)
-            
+            # Fuzzy matching z lepszą tolerancją błędów
             najlepszy_score = 0
             najlepsza_pozycja = -1
             
-            # Przeszukuj cały tekst fragmentami po 150 znaków z przesunięciem co 30 znaków
-            fragment_size = 150
-            step = 30
+            # Podziel tekst na fragmenty po 200 znaków z przesunięciem co 50 znaków
+            fragment_size = 200
+            step = 50
+            pozostaly_tekst = new_text[przesuniecie:]
             
-            for i in range(0, len(text_norm) - len(fraza_norm) + 1, step):
-                fragment = text_norm[i:i + fragment_size]
-                if len(fragment) < len(fraza_norm):
-                    break
-                    
-                score = fuzz.partial_ratio(fraza_norm, fragment)
+            for i in range(0, len(pozostaly_tekst) - len(fraza) + 1, step):
+                fragment = pozostaly_tekst[i:i + fragment_size]
+                
+                # Normalizuj dla lepszego dopasowania
+                fraza_norm = normalize_for_matching(fraza)
+                fragment_norm = normalize_for_matching(fragment)
+                
+                # Sprawdź podobieństwo z frazą
+                score = fuzz.partial_ratio(fraza_norm, fragment_norm)
+                
+                # Dodatkowe sprawdzenie - czy pierwsze słowo się zgadza
+                pierwsze_slowo = fraza_norm.split()[0] if fraza_norm.split() else ""
+                if pierwsze_slowo and pierwsze_slowo in fragment_norm:
+                    score += 20  # bonus za dopasowanie pierwszego słowa
                 
                 if score > najlepszy_score:
                     najlepszy_score = score
-                    # Znajdź pozycję pierwszego słowa frazy w fragmencie
-                    pierwsze_slowo = fraza_norm.split()[0] if fraza_norm.split() else ""
-                    if pierwsze_slowo and pierwsze_slowo in fragment:
-                        # Pozycja pierwszego słowa w znormalizowanym fragmencie
-                        word_pos_in_fragment = fragment.find(pierwsze_slowo)
-                        # Przybliżona pozycja w znormalizowanym tekście
-                        approx_pos = i + word_pos_in_fragment
-                        # Konwertuj na pozycję w oryginalnym tekście
-                        real_pos = find_real_position_in_text(pozostaly_tekst, text_norm, approx_pos)
-                        # 🔧 Znajdź początek słowa w oryginalnym tekście
-                        word_start = find_word_start(pozostaly_tekst, real_pos)
-                        najlepsza_pozycja = przesuniecie + word_start
-
-            # Jeśli nie znaleziono dobrego dopasowania, sprawdź jeszcze akapity (backup)
-            if najlepszy_score < prog:
-                akapity = pozostaly_tekst.split('\n\n')
-                current_pos = przesuniecie
-                
-                for akapit in akapity:
-                    if len(akapit.strip()) > 0:
-                        akapit_norm = normalize_text(akapit[:150])
-                        score = fuzz.partial_ratio(fraza_norm, akapit_norm)
-                        
-                        if score > najlepszy_score:
-                            najlepszy_score = score
-                            najlepsza_pozycja = current_pos
-                
-                current_pos += len(akapit) + 2
-
-        if najlepszy_score >= prog and najlepsza_pozycja != -1:
-            separator = f"\n\n\n[{idx}] >>>>>>>>>>>>>>>\n\n"
-            new_text = new_text[:najlepsza_pozycja] + separator + new_text[najlepsza_pozycja:]
-            przesuniecie = najlepsza_pozycja + len(separator)
-            print(f"✅ [FUZZY] [{idx}] ({plik}) Separator wstawiony ({najlepszy_score:.1f}%)")
-            znalezione.append((plik, fraza, najlepszy_score))
-        else:
-            nie_znalezione.append((plik, fraza))
-            print(f"❌ [{idx}] ({plik}) Brak dopasowania >= {prog}% dla: '{fraza}' (najlepsze: {najlepszy_score:.1f}%)")
+                    # Znajdź pozycję pierwszego słowa w oryginalnym fragmencie
+                    word_pos = fragment.lower().find(fraza.lower().split()[0]) if fraza.lower().split() else 0
+                    if word_pos == -1:
+                        word_pos = 0
+                    pozycja = przesuniecie + i + word_pos
+                    najlepsza_pozycja = find_word_start(new_text, pozycja)
+            
+            # Sprawdź czy znaleziono wystarczająco dobre dopasowanie
+            if najlepszy_score >= prog and najlepsza_pozycja != -1:
+                separator = f"\n\n\n[{idx}] >>>>>>>>>>>>>>>\n\n"
+                new_text = new_text[:najlepsza_pozycja] + separator + new_text[najlepsza_pozycja:]
+                przesuniecie = najlepsza_pozycja + len(separator)
+                print(f"✅ [FUZZY] [{idx}] ({plik}) '{fraza}' ({najlepszy_score:.1f}%)")
+                znalezione.append((plik, fraza, najlepszy_score))
+            else:
+                print(f"❌ [{idx}] ({plik}) Brak dopasowania >= {prog}% dla: '{fraza}' (najlepsze: {najlepszy_score:.1f}%)")
+                nie_znalezione.append((plik, fraza))
 
         return new_text, znalezione, nie_znalezione
-
-    # 🔧 NOWA funkcja pomocnicza
-    def find_real_position_in_text(original_text, normalized_text, norm_position):
-        """Konwertuje pozycję w znormalizowanym tekście na pozycję w oryginalnym tekście"""
-        chars_counted = 0
-        norm_chars_counted = 0
-        
-        for i, char in enumerate(original_text):
-            # Sprawdź czy to "liczący się" znak w znormalizowanym tekście
-            if char.isalnum() or char.isspace():
-                if norm_chars_counted >= norm_position:
-                    return i
-                if not (char.isspace() and (i == 0 or original_text[i-1].isspace())):
-                    norm_chars_counted += 1
-        
-        return min(norm_position, len(original_text) - 1)
-
     
     # Wstaw entery
     new_text, znalezione, nie_znalezione = wstaw_entery_z_fuzzy(text, frazy)
