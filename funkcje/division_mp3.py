@@ -99,6 +99,20 @@ def run():
             txt = re.sub(r'\s+', ' ', txt.strip())
             return txt
 
+        # 🔧 NOWA funkcja do znajdowania początku słowa
+        def find_word_start(text, rough_position):
+            """Znajdź początek słowa w pobliżu pozycji"""
+            # Sprawdź czy jesteśmy na początku słowa
+            if rough_position == 0 or not text[rough_position-1].isalnum():
+                return rough_position
+                
+            # Cofnij się do początku słowa
+            pos = rough_position
+            while pos > 0 and text[pos-1].isalnum():
+                pos -= 1
+                
+            return pos
+
         for idx, item in enumerate(frazy, start=1):
             fraza = item["fraza"].strip()
             plik = item["plik"]
@@ -111,6 +125,8 @@ def run():
             pos = text_fragment.find(fraza.lower())
             if pos != -1:
                 pozycja = pos + przesuniecie
+                # 🔧 Znajdź początek słowa
+                pozycja = find_word_start(new_text, pozycja)
                 separator = f"\n\n\n[{idx}] >>>>>>>>>>>>>>>\n\n"
                 new_text = new_text[:pozycja] + separator + new_text[pozycja:]
                 przesuniecie = pozycja + len(separator)
@@ -125,9 +141,9 @@ def run():
             najlepszy_score = 0
             najlepsza_pozycja = -1
             
-            # Przeszukuj cały tekst fragmentami po 100 znaków z przesunięciem co 20 znaków
-            fragment_size = 100
-            step = 20
+            # Przeszukuj cały tekst fragmentami po 150 znaków z przesunięciem co 30 znaków
+            fragment_size = 150
+            step = 30
             
             for i in range(0, len(text_norm) - len(fraza_norm) + 1, step):
                 fragment = text_norm[i:i + fragment_size]
@@ -138,15 +154,18 @@ def run():
                 
                 if score > najlepszy_score:
                     najlepszy_score = score
-                    # Znajdź rzeczywistą pozycję w oryginalnym tekście
-                    # Szukamy pierwszego słowa frazy w tym fragmencie
+                    # Znajdź pozycję pierwszego słowa frazy w fragmencie
                     pierwsze_slowo = fraza_norm.split()[0] if fraza_norm.split() else ""
                     if pierwsze_slowo and pierwsze_slowo in fragment:
-                        # Przybliżona pozycja - konwertuj z znormalizowanej na rzeczywistą
-                        approx_pos = i + fragment.find(pierwsze_slowo)
-                        # Znajdź odpowiadającą pozycję w oryginalnym tekście
+                        # Pozycja pierwszego słowa w znormalizowanym fragmencie
+                        word_pos_in_fragment = fragment.find(pierwsze_slowo)
+                        # Przybliżona pozycja w znormalizowanym tekście
+                        approx_pos = i + word_pos_in_fragment
+                        # Konwertuj na pozycję w oryginalnym tekście
                         real_pos = find_real_position_in_text(pozostaly_tekst, text_norm, approx_pos)
-                        najlepsza_pozycja = przesuniecie + real_pos
+                        # 🔧 Znajdź początek słowa w oryginalnym tekście
+                        word_start = find_word_start(pozostaly_tekst, real_pos)
+                        najlepsza_pozycja = przesuniecie + word_start
 
             # Jeśli nie znaleziono dobrego dopasowania, sprawdź jeszcze akapity (backup)
             if najlepszy_score < prog:
@@ -161,18 +180,18 @@ def run():
                         if score > najlepszy_score:
                             najlepszy_score = score
                             najlepsza_pozycja = current_pos
-                    
-                    current_pos += len(akapit) + 2
+                
+                current_pos += len(akapit) + 2
 
-            if najlepszy_score >= prog and najlepsza_pozycja != -1:
-                separator = f"\n\n\n[{idx}] >>>>>>>>>>>>>>>\n\n"
-                new_text = new_text[:najlepsza_pozycja] + separator + new_text[najlepsza_pozycja:]
-                przesuniecie = najlepsza_pozycja + len(separator)
-                print(f"✅ [FUZZY] [{idx}] ({plik}) Separator wstawiony ({najlepszy_score:.1f}%)")
-                znalezione.append((plik, fraza, najlepszy_score))
-            else:
-                nie_znalezione.append((plik, fraza))
-                print(f"❌ [{idx}] ({plik}) Brak dopasowania >= {prog}% dla: '{fraza}' (najlepsze: {najlepszy_score:.1f}%)")
+        if najlepszy_score >= prog and najlepsza_pozycja != -1:
+            separator = f"\n\n\n[{idx}] >>>>>>>>>>>>>>>\n\n"
+            new_text = new_text[:najlepsza_pozycja] + separator + new_text[najlepsza_pozycja:]
+            przesuniecie = najlepsza_pozycja + len(separator)
+            print(f"✅ [FUZZY] [{idx}] ({plik}) Separator wstawiony ({najlepszy_score:.1f}%)")
+            znalezione.append((plik, fraza, najlepszy_score))
+        else:
+            nie_znalezione.append((plik, fraza))
+            print(f"❌ [{idx}] ({plik}) Brak dopasowania >= {prog}% dla: '{fraza}' (najlepsze: {najlepszy_score:.1f}%)")
 
         return new_text, znalezione, nie_znalezione
 
