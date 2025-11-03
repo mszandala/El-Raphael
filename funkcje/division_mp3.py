@@ -82,7 +82,7 @@ def run():
     print(f"\n📋 Podsumowanie transkrypcji: znaleziono {len(frazy)} fraz z {len(mp3_files)} plików")
 
     # 🔧 Funkcja wstawiająca entery z fuzzy matching
-    def wstaw_entery_z_fuzzy(text, frazy, prog=70):
+    def wstaw_entery_z_fuzzy(text, frazy, prog):
         znalezione, nie_znalezione = [], []
         new_text = text
         przesuniecie = 0
@@ -140,7 +140,7 @@ def run():
 
     # 🔹 5. Wstawianie separatorów + poprawa myślników
     if frazy:
-        text = wstaw_entery_z_fuzzy(text, frazy, prog=70)
+        text = wstaw_entery_z_fuzzy(text, frazy, prog=50)
         text = popraw_myslniki(text)
     else:
         print("⚠️ Brak fraz do dopasowania!")
