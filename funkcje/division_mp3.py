@@ -128,63 +128,125 @@ def run():
     print(f"\n📋 Podsumowanie transkrypcji: znaleziono {len(frazy)} fraz z {len(mp3_files)} plików")
     
     # Funkcja do wstawiania enterów z fuzzy matching
-    def wstaw_entery_z_fuzzy(text, frazy, prog=50):  # zmniejszony próg z 65 na 50
+    def wstaw_entery_z_fuzzy(text, frazy, prog=50):
         znalezione, nie_znalezione = [], []
         new_text = text
         przesuniecie = 0
+
+        # 🔧 Funkcja do znajdowania początku zdania/wypowiedzi
+        def find_sentence_start(text, rough_position):
+            """Znajdź początek zdania w pobliżu pozycji"""
+            # Sprawdź czy jesteśmy już na początku zdania
+            if rough_position == 0:
+                return 0
+                
+            # Szukaj wstecz znaczników początku zdania
+            pos = rough_position
+            while pos > 0:
+                char = text[pos-1]
+                # Znaki oznaczające koniec poprzedniego zdania
+                if char in '.!?':
+                    # Przejdź przez spacje i nowe linie
+                    while pos < len(text) and text[pos] in ' \n\t':
+                        pos += 1
+                    return pos
+                # Myślnik na początku linii (dialog)
+                elif char == '\n' and pos < len(text) and text[pos] == '—':
+                    return pos
+                # Początek nowego akapitu
+                elif char == '\n' and pos > 1 and text[pos-2] == '\n':
+                    return pos
+                pos -= 1
+                
+            return max(0, rough_position)
 
         for idx, item in enumerate(frazy, start=1):
             fraza = item["fraza"].strip()
             plik = item["plik"]
             
-            # Najpierw sprawdź dokładne dopasowanie (case-insensitive)
+            # 🔧 Ulepszone dokładne dopasowanie - szukaj na początku zdań
             text_fragment = new_text[przesuniecie:].lower()
             fraza_lower = fraza.lower()
-            pos = text_fragment.find(fraza_lower)
             
-            if pos != -1:
-                pozycja = pos + przesuniecie
-                # Znajdź początek słowa
-                pozycja = find_word_start(new_text, pozycja)
-                separator = f"\n\n\n[{idx}] >>>>>>>>>>>>>>>\n\n"
-                new_text = new_text[:pozycja] + separator + new_text[pozycja:]
-                przesuniecie = pozycja + len(separator)
-                print(f"✅ [DOKŁADNE] [{idx}] ({plik}) '{fraza}' (100.0%)")
-                znalezione.append((plik, fraza, 100.0))
+            # Szukaj wszystkich wystąpień frazy
+            search_pos = 0
+            found_exact = False
+            
+            while True:
+                pos = text_fragment.find(fraza_lower, search_pos)
+                if pos == -1:
+                    break
+                    
+                # Sprawdź czy to jest na początku zdania
+                real_pos = pos + przesuniecie
+                sentence_start = find_sentence_start(new_text, real_pos)
+                
+                # Sprawdź czy fraza zaczyna się w pobliżu początku zdania (tolerancja 10 znaków)
+                if abs(real_pos - sentence_start) <= 10:
+                    separator = f"\n\n\n[{idx}] >>>>>>>>>>>>>>>\n\n"
+                    new_text = new_text[:sentence_start] + separator + new_text[sentence_start:]
+                    przesuniecie = sentence_start + len(separator)
+                    print(f"✅ [DOKŁADNE] [{idx}] ({plik}) '{fraza}' (100.0%)")
+                    znalezione.append((plik, fraza, 100.0))
+                    found_exact = True
+                    break
+                    
+                search_pos = pos + 1
+            
+            if found_exact:
                 continue
             
-            # Fuzzy matching z lepszą tolerancją błędów
+            # 🔧 Fuzzy matching - szukaj na początku zdań/akapitów
             najlepszy_score = 0
             najlepsza_pozycja = -1
             
-            # Podziel tekst na fragmenty po 200 znaków z przesunięciem co 50 znaków
-            fragment_size = 200
-            step = 50
+            # Znajdź wszystkie początki zdań w pozostałym tekście
             pozostaly_tekst = new_text[przesuniecie:]
+            sentence_starts = []
             
-            for i in range(0, len(pozostaly_tekst) - len(fraza) + 1, step):
-                fragment = pozostaly_tekst[i:i + fragment_size]
+            # Dodaj pozycję 0 (początek tekstu)
+            sentence_starts.append(0)
+            
+            # Znajdź wszystkie początki zdań
+            for i in range(len(pozostaly_tekst)):
+                char = pozostaly_tekst[i]
+                if i > 0:
+                    prev_char = pozostaly_tekst[i-1]
+                    # Koniec zdania + nowe zdanie
+                    if prev_char in '.!?' and char not in ' \n\t':
+                        sentence_starts.append(i)
+                    # Myślnik na początku linii (dialog)
+                    elif prev_char == '\n' and char == '—':
+                        sentence_starts.append(i)
+                    # Nowy akapit
+                    elif i > 1 and pozostaly_tekst[i-2:i] == '\n\n' and char not in ' \n\t':
+                        sentence_starts.append(i)
+            
+            # Sprawdź każdy początek zdania
+            for start_pos in sentence_starts:
+                if start_pos + 200 <= len(pozostaly_tekst):
+                    fragment = pozostaly_tekst[start_pos:start_pos + 200]
+                else:
+                    fragment = pozostaly_tekst[start_pos:]
+                    
+                if len(fragment) < len(fraza):
+                    continue
                 
                 # Normalizuj dla lepszego dopasowania
                 fraza_norm = normalize_for_matching(fraza)
                 fragment_norm = normalize_for_matching(fragment)
                 
-                # Sprawdź podobieństwo z frazą
-                score = fuzz.partial_ratio(fraza_norm, fragment_norm)
+                # Sprawdź podobieństwo z początkiem fragmentu
+                score = fuzz.partial_ratio(fraza_norm, fragment_norm[:len(fraza_norm)*2])
                 
-                # Dodatkowe sprawdzenie - czy pierwsze słowo się zgadza
+                # Bonus za dopasowanie pierwszego słowa
                 pierwsze_slowo = fraza_norm.split()[0] if fraza_norm.split() else ""
-                if pierwsze_slowo and pierwsze_slowo in fragment_norm:
-                    score += 20  # bonus za dopasowanie pierwszego słowa
+                if pierwsze_slowo and fragment_norm.startswith(pierwsze_slowo):
+                    score += 30  # zwiększony bonus
                 
                 if score > najlepszy_score:
                     najlepszy_score = score
-                    # Znajdź pozycję pierwszego słowa w oryginalnym fragmencie
-                    word_pos = fragment.lower().find(fraza.lower().split()[0]) if fraza.lower().split() else 0
-                    if word_pos == -1:
-                        word_pos = 0
-                    pozycja = przesuniecie + i + word_pos
-                    najlepsza_pozycja = find_word_start(new_text, pozycja)
+                    najlepsza_pozycja = przesuniecie + start_pos
             
             # Sprawdź czy znaleziono wystarczająco dobre dopasowanie
             if najlepszy_score >= prog and najlepsza_pozycja != -1:
