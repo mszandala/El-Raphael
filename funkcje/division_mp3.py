@@ -2,8 +2,6 @@ import os
 import re
 from pydub import AudioSegment
 import whisper
-from fuzzywuzzy import fuzz
-from fuzzywuzzy import process
 
 # Użyj rapidfuzz zamiast fuzzywuzzy
 try:
