@@ -186,19 +186,31 @@ def run():
     def find_best_separator_position(text, phrase_position):
         """
         Znajdź najlepsze miejsce na separator PRZED frazą.
-        Priorytet: początek akapitu > początek zdania > początek linii > początek słowa
+        Priorytet: bezpośrednio przed myślnikiem dialogu > początek akapitu > początek zdania > początek linii > początek słowa
         """
         if phrase_position == 0:
             return 0
         
         # Sprawdź różne pozycje wstecz od phrase_position
-        search_back = min(200, phrase_position)  # Zwiększone z 150 na 200
+        search_back = min(200, phrase_position)
         start = phrase_position - search_back
         
         best_pos = phrase_position
         best_score = 0
         
-        # Szukaj najlepszego miejsca
+        # NAJPIERW: Sprawdź czy fraza zaczyna się od myślnika dialogu
+        # Jeśli tak, zwróć pozycję PRZED myślnikiem (z zachowaniem entera przed nim)
+        check_range = min(10, phrase_position)
+        for i in range(phrase_position, max(0, phrase_position - check_range) - 1, -1):
+            if i > 0 and text[i-1:i+1] == '— ':
+                # Znaleziono myślnik tuż przed frazą
+                # Sprawdź czy przed myślnikiem jest enter
+                if i >= 2 and text[i-2] == '\n':
+                    return i - 1  # Przed enterem i myślnikiem
+                else:
+                    return i - 1  # Bezpośrednio przed myślnikiem
+        
+        # Jeśli nie znaleziono myślnika przy frazie, szukaj normalnie
         for i in range(phrase_position, start - 1, -1):
             score = 0
             
@@ -208,13 +220,20 @@ def run():
             
             char = text[i-1]
             prev_char = text[i-2] if i >= 2 else ''
+            next_chars = text[i:i+2] if i+1 < len(text) else text[i:]
             
-            # Nowy akapit (dwa entery)
-            if char == '\n' and prev_char == '\n':
-                score = 100
-            # Początek dialogu
-            elif char == '—' or (i >= 2 and text[i-2:i] == '— '):
-                score = 90
+            # NAJWYŻSZY PRIORYTET: Bezpośrednio przed myślnikiem dialogu (z enterem)
+            if next_chars.startswith('— ') and char == '\n':
+                score = 150  # Najwyższy priorytet!
+            # Bezpośrednio przed myślnikiem dialogu (bez entera)
+            elif next_chars.startswith('— '):
+                score = 140
+            # Nowy akapit (dwa entery) - ale NIE jeśli zaraz po nim jest myślnik
+            elif char == '\n' and prev_char == '\n':
+                if not next_chars.startswith('— '):
+                    score = 100
+                else:
+                    score = 145  # Jeszcze lepiej - enter przed myślnikiem
             # Po końcu zdania z enterem
             elif char == '\n' and i >= 2 and prev_char in '.!?':
                 score = 85
@@ -231,23 +250,23 @@ def run():
             elif not char.isalnum() and (i < len(text) and text[i].isalnum()):
                 score = 40
             
-            # Preferuj pozycje bliżej frazy (ale nie za bardzo)
+            # Preferuj pozycje bliżej frazy
             distance = phrase_position - i
             if distance <= 5:
-                score += 25  # Bardzo blisko
+                score += 25
             elif distance <= 20:
-                score += 15  # Blisko
+                score += 15
             elif distance <= 50:
-                score += 10  # Średnio
+                score += 10
             elif distance <= 100:
-                score += 5   # Daleko
+                score += 5
             
             if score > best_score:
                 best_score = score
                 best_pos = i
                 
-                # Jeśli znaleziono idealną pozycję (nowy akapit), użyj jej
-                if score >= 100:
+                # Jeśli znaleziono pozycję przed myślnikiem, użyj jej natychmiast
+                if score >= 140:
                     break
         
         return best_pos
@@ -289,44 +308,75 @@ def run():
     print(f"\n📋 Podsumowanie transkrypcji: znaleziono {len(frazy)} fraz z {len(mp3_files)} plików")
     
     # 🔧 CAŁKOWICIE PRZEPISANA funkcja wstawiania enterów
-    def wstaw_entery_z_fuzzy(text, frazy, prog=50):  # Obniżony próg z 60 do 50
+    def wstaw_entery_z_fuzzy(text, frazy, prog=50):
         """
         Wstawia separatory w tekście na podstawie znalezionych fraz.
-        Zawsze wstawia separator PRZED pierwszym słowem frazy.
+        KROK 1: Znajdź wszystkie pozycje
+        KROK 2: Wstaw separatory od końca do początku (żeby nie zepsuć pozycji)
         """
         znalezione = []
         nie_znalezione = []
-        new_text = text
-        offset = 0  # Przesunięcie spowodowane wstawionymi separatorami
+        
+        # KROK 1: Znajdź wszystkie pozycje fraz (bez wstawiania separatorów)
+        print(f"\n{'='*80}")
+        print(f"🔍 KROK 1: Wyszukiwanie fraz w tekście...")
+        print(f"{'='*80}\n")
+        
+        pozycje_do_wstawienia = []  # Lista: (separator_pos, idx, plik, fraza, score)
+        last_found_pos = 0  # Ostatnio znaleziona pozycja (musi rosnąć)
         
         for idx, item in enumerate(frazy, start=1):
             fraza = item["fraza"].strip()
             plik = item["plik"]
             
-            print(f"\n🔍 [{idx}] Szukam: '{fraza[:50]}...'")
+            print(f"🔍 [{idx}] Szukam: '{fraza[:50]}...'")
             
-            # Znajdź frazę w oryginalnym tekście (z uwzględnieniem offset)
-            phrase_pos, score = find_phrase_with_sliding_window(new_text, fraza, offset, threshold=prog)
+            # Znajdź frazę w tekście (szukaj od ostatnio znalezionej pozycji)
+            phrase_pos, score = find_phrase_with_sliding_window(text, fraza, last_found_pos, threshold=prog)
             
             if phrase_pos is None:
                 print(f"❌ [{idx}] ({plik}) Brak dopasowania >= {prog}% dla: '{fraza}' (najlepsze: {score:.1f}%)")
                 nie_znalezione.append((plik, fraza, score))
                 continue
             
+            # Sprawdź czy pozycja jest po ostatnio znalezionej (frazy muszą iść w kolejności!)
+            if phrase_pos < last_found_pos:
+                print(f"⚠️  [{idx}] OSTRZEŻENIE: Znaleziono frazę PRZED poprzednią! Pozycja: {phrase_pos}, ostatnia: {last_found_pos}")
+                print(f"❌ [{idx}] Pomijam to dopasowanie - frazy muszą iść w kolejności")
+                nie_znalezione.append((plik, fraza, score))
+                continue
+            
             # Znajdź najlepsze miejsce na separator (przed frazą)
-            separator_pos = find_best_separator_position(new_text, phrase_pos)
+            separator_pos = find_best_separator_position(text, phrase_pos)
             
-            # Wstaw separator
-            separator = f"\n\n\n[{idx}] >>>>>>>>>>>>>>>\n\n"
-            new_text = new_text[:separator_pos] + separator + new_text[separator_pos:]
+            # Dodaj do listy pozycji do wstawienia
+            pozycje_do_wstawienia.append((separator_pos, idx, plik, fraza, score))
             
-            # Zaktualizuj offset
-            offset = separator_pos + len(separator)
+            # Zaktualizuj ostatnią pozycję
+            last_found_pos = phrase_pos + len(fraza)
             
             # Wyświetl informację o dopasowaniu
             match_type = "DOKŁADNE" if score >= 95 else "FUZZY"
-            print(f"✅ [{match_type}] [{idx}] ({plik}) '{fraza[:40]}...' ({score:.1f}%)")
+            context = text[separator_pos:separator_pos+50].replace('\n', '↵')
+            print(f"✅ [{match_type}] [{idx}] '{fraza[:40]}...' ({score:.1f}%)")
+            print(f"   📍 Separator zostanie wstawiony na pozycji {separator_pos}: '{context}...'")
+            
             znalezione.append((plik, fraza, score))
+        
+        # KROK 2: Wstaw separatory od końca do początku
+        print(f"\n{'='*80}")
+        print(f"✏️  KROK 2: Wstawianie separatorów (od końca do początku)...")
+        print(f"{'='*80}\n")
+        
+        new_text = text
+        
+        # Sortuj pozycje malejąco (od końca do początku)
+        pozycje_do_wstawienia.sort(reverse=True, key=lambda x: x[0])
+        
+        for separator_pos, idx, plik, fraza, score in pozycje_do_wstawienia:
+            separator = f"\n\n\n[{idx}] >>>>>>>>>>>>>>>\n\n"
+            new_text = new_text[:separator_pos] + separator + new_text[separator_pos:]
+            print(f"✏️  Wstawiono separator [{idx}] na pozycji {separator_pos}")
         
         return new_text, znalezione, nie_znalezione
     
@@ -339,23 +389,4 @@ def run():
     print(f"✅ Znalezione dopasowania: {len(znalezione)}/{len(frazy)} ({len(znalezione)*100//len(frazy)}%)")
     
     if znalezione:
-        print(f"\n✅ ZNALEZIONE ({len(znalezione)}):")
-        for plik, fraza, score in znalezione:
-            icon = "🎯" if score >= 90 else "✅"
-            print(f"   {icon} {plik}: {fraza[:60]}... ({score:.1f}%)")
-    
-    if nie_znalezione:
-        print(f"\n❌ NIE ZNALEZIONE ({len(nie_znalezione)}):")
-        for plik, fraza, score in nie_znalezione:
-            print(f"   ❌ {plik}: {fraza[:60]}... (najlepsze: {score:.1f}%)")
-    
-    # Zapisz wynik
-    output_path = os.path.join(temp_folder, "z_enterami.txt")
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write(new_text)
-    
-    print(f"\n✅ Gotowe! Wynik zapisano do: {output_path}")
-    print(f"{'='*80}")
-
-if __name__ == "__main__":
-    run()
+        print(f"\n✅ ZNALEZIONE ({len(znalezien
