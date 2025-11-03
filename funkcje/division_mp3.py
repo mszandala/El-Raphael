@@ -19,9 +19,9 @@ def run():
     # Wycisz ostrzeżenia na początku
     warnings.filterwarnings("ignore", message="FP16 is not supported on CPU")
     
-    # Ścieżki
-    temp_folder = "temp"
-    mp3_folder = os.path.join(temp_folder, "mp3")
+    # ✅ POPRAWIONE ŚCIEŻKI
+    temp_folder = "temp"  # Folder z plikiem rozdziału
+    mp3_folder = os.path.join(temp_folder, "mp3")  # Podfolder temp/mp3/ z MP3
     
     # Znajdź plik rozdziału
     txt_files = [f for f in os.listdir(temp_folder) if f.startswith("ROZDZIAŁ_") and f.endswith(".txt")]
