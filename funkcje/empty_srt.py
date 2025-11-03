@@ -158,4 +158,3 @@ def run():
             print("❌ Wystąpił błąd podczas tworzenia SRT:", e)
     else:
         print("⚠️ Nie wybrano pliku. Anulowano.")
-
