@@ -89,60 +89,78 @@ def run():
         """
         if not search_phrase or len(search_phrase) < 3:
             return None, 0
-        
+
         # Normalizuj frazę do wyszukiwania
         phrase_norm = normalize_for_matching(search_phrase)
         phrase_words = phrase_norm.split()
-        
+
         if not phrase_words:
             return None, 0
-        
+
         # Parametry sliding window
-        window_size = len(search_phrase) * 3  # Okno 3x większe niż fraza
+        window_size = max(30, len(search_phrase) * 3)  # minimalne okno, by nie było za krótkie
         step_size = 20  # Krok co 20 znaków
-        
+
         best_pos = None
         best_score = 0
         best_match_info = ""
-        
-        # Iteruj po tekście od start_offset
+
+        # Tekst do przeszukania (od offsetu)
         search_text = original_text[start_offset:]
-        
-        for i in range(0, len(search_text) - window_size, step_size):
-            # Wyciągnij fragment
+
+        # Iteruj po tekście od start_offset, uwzględniając koniec (ostatnie okno)
+        max_start = max(0, len(search_text) - window_size)
+        i = 0
+        while i <= max_start:
             window = search_text[i:i + window_size]
             window_norm = normalize_for_matching(window)
-            
+
             # Oblicz podobieństwo
             score = fuzz.partial_ratio(phrase_norm, window_norm)
-            
+
             # Dodatkowe punkty jeśli pierwsze słowo frazy jest w oknie
             if phrase_words and phrase_words[0] in window_norm.split():
                 score = min(100, score + 10)
-            
-            # Sprawdź czy to lepsze dopasowanie
+
             if score > best_score:
                 best_score = score
-                # Znajdź dokładną pozycję pierwszego słowa w oryginalnym oknie
-                first_word_pos = find_first_word_position_in_window(window, phrase_words[0])
+                first_word_pos = find_first_word_position_in_window(window, phrase_words[0]) if phrase_words else None
                 if first_word_pos is not None:
                     best_pos = start_offset + i + first_word_pos
                 else:
                     best_pos = start_offset + i
-                
-                best_match_info = window[:100]
-                
-                # Jeśli znaleziono bardzo dobre dopasowanie, przestań szukać
+                best_match_info = window
+
+                # Jeśli bardzo dobre dopasowanie, przerwij
                 if score >= 95:
                     break
-        
-        # Debugowanie
+
+            i += step_size
+
+        # sprawdź jeszcze ostatnie okno (jeśli pozostało)
+        if len(search_text) > 0 and i < len(search_text):
+            window = search_text[-window_size:]
+            window_norm = normalize_for_matching(window)
+            score = fuzz.partial_ratio(phrase_norm, window_norm)
+            if phrase_words and phrase_words[0] in window_norm.split():
+                score = min(100, score + 10)
+            if score > best_score:
+                best_score = score
+                first_word_pos = find_first_word_position_in_window(window, phrase_words[0]) if phrase_words else None
+                best_pos = start_offset + len(search_text) - window_size + (first_word_pos or 0)
+                best_match_info = window
+
+        # Debug: pokaż więcej informacji gdy najlepsze dopasowanie jest poniżej progu
+        if best_score < threshold:
+            print(f"⚠️ SLIDING: fraza='{search_phrase[:40]}...' score={best_score:.1f}% (próg {threshold}%)")
+            print(f"    phrase_norm='{phrase_norm[:80]}'")
+            print(f"    best_match_preview='{best_match_info[:80].replace(chr(10), '↵')}'")
+            # nadal zwracamy najlepsze, ale wyraźnie informujemy
+
         if best_score >= threshold:
-            print(f"   🎯 Najlepsze dopasowanie ({best_score:.1f}%): '{best_match_info[:50]}...'")
-        
-        if best_score >= threshold:
+            print(f"   🎯  Najlepsze dopasowanie ({best_score:.1f}%): '{best_match_info[:80]}...'")
             return best_pos, best_score
-        
+
         return None, best_score
     
     # Pomocnicza funkcja do znajdowania pozycji pierwszego słowa
@@ -316,68 +334,70 @@ def run():
         """
         znalezione = []
         nie_znalezione = []
-        
+
         # KROK 1: Znajdź wszystkie pozycje fraz (bez wstawiania separatorów)
         print(f"\n{'='*80}")
         print(f"🔍 KROK 1: Wyszukiwanie fraz w tekście...")
         print(f"{'='*80}\n")
-        
+
         pozycje_do_wstawienia = []  # Lista: (separator_pos, idx, plik, fraza, score)
-        last_found_pos = 0  # Ostatnio znaleziona pozycja (musi rosnąć)
-        
+        last_found_pos = 0
+
         for idx, item in enumerate(frazy, start=1):
             fraza = item["fraza"].strip()
             plik = item["plik"]
-            
+
             print(f"🔍 [{idx}] Szukam: '{fraza[:50]}...'")
-            
-            # Znajdź frazę w tekście (szukaj od ostatnio znalezionej pozycji)
+
             phrase_pos, score = find_phrase_with_sliding_window(text, fraza, last_found_pos, threshold=prog)
-            
+
             if phrase_pos is None:
                 print(f"❌ [{idx}] ({plik}) Brak dopasowania >= {prog}% dla: '{fraza}' (najlepsze: {score:.1f}%)")
                 nie_znalezione.append((plik, fraza, score))
                 continue
-            
-            # Sprawdź czy pozycja jest po ostatnio znalezionej (frazy muszą iść w kolejności!)
+
+            # Sprawdź kolejność
             if phrase_pos < last_found_pos:
                 print(f"⚠️  [{idx}] OSTRZEŻENIE: Znaleziono frazę PRZED poprzednią! Pozycja: {phrase_pos}, ostatnia: {last_found_pos}")
                 print(f"❌ [{idx}] Pomijam to dopasowanie - frazy muszą iść w kolejności")
                 nie_znalezione.append((plik, fraza, score))
                 continue
-            
-            # Znajdź najlepsze miejsce na separator (przed frazą)
+
             separator_pos = find_best_separator_position(text, phrase_pos)
-            
-            # Dodaj do listy pozycji do wstawienia
+
             pozycje_do_wstawienia.append((separator_pos, idx, plik, fraza, score))
-            
-            # Zaktualizuj ostatnią pozycję
+
             last_found_pos = phrase_pos + len(fraza)
-            
-            # Wyświetl informację o dopasowaniu
+            znalezione.append((plik, fraza, score))
             match_type = "DOKŁADNE" if score >= 95 else "FUZZY"
             context = text[separator_pos:separator_pos+50].replace('\n', '↵')
             print(f"✅ [{match_type}] [{idx}] '{fraza[:40]}...' ({score:.1f}%)")
-            print(f"   📍 Separator zostanie wstawiony na pozycji {separator_pos}: '{context}...'")
-            
-            znalezione.append((plik, fraza, score))
-        
-        # KROK 2: Wstaw separatory od końca do początku
+            print(f"   📍 Separator ma być na pozycji {separator_pos}: '{context}...'")
+
+        # KROK 2: Przygotuj listę do wstawienia - upewnij się, że pozycje są unikalne i malejące
         print(f"\n{'='*80}")
         print(f"✏️  KROK 2: Wstawianie separatorów (od końca do początku)...")
         print(f"{'='*80}\n")
-        
-        new_text = text
-        
-        # Sortuj pozycje malejąco (od końca do początku)
+
+        # Sortuj malejąco i skoryguj kolizje (jeśli dwa separatory mają tę samą pozycję, przesuwamy kolejny o 1 znak w lewo)
         pozycje_do_wstawienia.sort(reverse=True, key=lambda x: x[0])
-        
-        for separator_pos, idx, plik, fraza, score in pozycje_do_wstawienia:
+        adjusted = []
+        used = set()
+        for sep_pos, idx, plik, fraza, score in pozycje_do_wstawienia:
+            orig = sep_pos
+            while sep_pos in used and sep_pos > 0:
+                sep_pos -= 1
+            used.add(sep_pos)
+            adjusted.append((sep_pos, idx, plik, fraza, score))
+            if sep_pos != orig:
+                print(f"⚠️ Korekta pozycji separatora [{idx}] z {orig} -> {sep_pos} (kolizja)")
+
+        new_text = text
+        for separator_pos, idx, plik, fraza, score in adjusted:
             separator = f"\n\n\n[{idx}] >>>>>>>>>>>>>>>\n\n"
             new_text = new_text[:separator_pos] + separator + new_text[separator_pos:]
             print(f"✏️  Wstawiono separator [{idx}] na pozycji {separator_pos}")
-        
+
         return new_text, znalezione, nie_znalezione
     
     # Wstaw entery
