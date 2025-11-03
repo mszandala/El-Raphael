@@ -79,125 +79,147 @@ def run():
             
         return text
     
-    # 🔧 Znacznie ulepszona funkcja do znajdowania pozycji
-    def find_better_position(text, rough_position, search_phrase):
-        """Znajdź lepszą pozycję dla separatora - zawsze na początku słowa/zdania"""
+    # 🔧 NOWA FUNKCJA - znajduje frazę w oryginalnym tekście
+    def find_phrase_in_original_text(original_text, search_phrase, start_offset=0, threshold=70):
+        """
+        Znajduje frazę w oryginalnym tekście (NIE znormalizowanym).
+        Zwraca pozycję POCZĄTKU pierwszego słowa frazy.
+        """
+        # Najpierw spróbuj dokładnego dopasowania (case-insensitive)
+        search_lower = search_phrase.lower()
+        text_from_offset = original_text[start_offset:]
         
-        # Sprawdź kilka pozycji wokół rough_position
-        search_range = 100  # zwiększony zakres
-        start = max(0, rough_position - search_range)
-        end = min(len(text), rough_position + search_range)
-        
-        fragment = text[start:end]
-        search_phrase_lower = search_phrase.lower().strip()
-        
-        # Szukaj dokładnej frazy w fragmencie
-        phrase_pos = fragment.lower().find(search_phrase_lower)
-        if phrase_pos != -1:
-            exact_pos = start + phrase_pos
+        # Szukaj dokładnej frazy
+        pos = text_from_offset.lower().find(search_lower)
+        if pos != -1:
+            absolute_pos = start_offset + pos
             # Sprawdź czy to początek słowa
-            if exact_pos == 0 or not text[exact_pos-1].isalnum():
-                return exact_pos
+            if absolute_pos == 0 or not original_text[absolute_pos-1].isalnum():
+                return absolute_pos, 100.0
         
-        # Jeśli nie ma dokładnej frazy, szukaj pierwszego słowa
-        pierwsze_slowo = search_phrase_lower.split()[0] if search_phrase_lower.split() else ""
-        if not pierwsze_slowo or len(pierwsze_slowo) < 3:
-            return rough_position
+        # Jeśli nie znaleziono dokładnie, użyj fuzzy matching
+        phrase_norm = normalize_for_matching(search_phrase)
+        first_word = phrase_norm.split()[0] if phrase_norm.split() else ""
         
-        # Znajdź wszystkie wystąpienia pierwszego słowa w fragmencie
-        word_positions = []
+        if not first_word or len(first_word) < 3:
+            return None, 0
+        
+        best_pos = None
+        best_score = 0
+        
+        # Szukaj pierwszego słowa w tekście
+        search_text = original_text[start_offset:]
         pos = 0
-        while True:
-            pos = fragment.lower().find(pierwsze_slowo, pos)
-            if pos == -1:
+        
+        while pos < len(search_text):
+            # Znajdź następne wystąpienie pierwszej litery pierwszego słowa
+            char_pos = search_text[pos:].lower().find(first_word[0])
+            if char_pos == -1:
                 break
             
-            absolute_pos = start + pos
+            pos += char_pos
+            absolute_pos = start_offset + pos
             
-            # ✅ KLUCZOWE: Sprawdź czy to POCZĄTEK słowa
-            is_word_start = (absolute_pos == 0 or 
-                            not text[absolute_pos-1].isalnum() or
-                            text[absolute_pos-1] in ' \n\t—.!?')
+            # Sprawdź czy to początek słowa
+            if absolute_pos > 0 and original_text[absolute_pos-1].isalnum():
+                pos += 1
+                continue
             
-            # ✅ KLUCZOWE: Sprawdź czy to NIE jest środek słowa
-            is_not_word_middle = True
-            if absolute_pos > 0 and absolute_pos < len(text) - 1:
-                prev_char = text[absolute_pos-1]
-                next_char = text[absolute_pos + len(pierwsze_slowo)]
-                # Jeśli poprzedni i następny znak to litery - to środek słowa
-                if prev_char.isalnum() and next_char.isalnum():
-                    is_not_word_middle = False
+            # Wyciągnij fragment tekstu dla porównania
+            fragment_len = max(len(search_phrase) * 3, 300)
+            fragment = original_text[absolute_pos:absolute_pos + fragment_len]
             
-            if is_word_start and is_not_word_middle:
-                word_positions.append(absolute_pos)
-                
-            pos += 1
-        
-        if not word_positions:
-            # Jeśli nie znaleziono dobrej pozycji, znajdź najbliższą granicę słowa
-            return find_nearest_word_boundary(text, rough_position)
-        
-        # Znajdź najlepszą pozycję z preferencjami
-        best_pos = word_positions[0]
-        best_score = -1
-        
-        for word_pos in word_positions:
-            score = 0
+            # Oblicz podobieństwo na znormalizowanych tekstach
+            fragment_norm = normalize_for_matching(fragment)
+            score = fuzz.partial_ratio(phrase_norm, fragment_norm)
             
-            # Sprawdź co jest przed pozycją
-            if word_pos == 0:
-                score += 100  # początek tekstu
-            elif word_pos > 0:
-                before_char = text[word_pos-1]
-                if before_char == '\n' and word_pos > 1 and text[word_pos-2] == '\n':
-                    score += 90  # nowy akapit
-                elif before_char == '—' or (word_pos > 1 and text[word_pos-2:word_pos] == '— '):
-                    score += 80  # początek dialogu
-                elif before_char in '.!?':
-                    score += 70  # po końcu zdania
-                elif before_char == '\n':
-                    score += 60  # nowa linia
-                elif before_char == ' ':
-                    score += 30  # po spacji
-            
-            # Preferuj pozycje bliższe oryginalnemu rough_position
-            distance = abs(word_pos - rough_position)
-            if distance <= 20:
-                score += 20
-            elif distance <= 50:
-                score += 10
+            # Dodatkowy bonus jeśli pierwsze słowo dokładnie pasuje
+            fragment_words = fragment_norm.split()
+            if fragment_words and fragment_words[0] == first_word:
+                score = min(100, score + 15)
             
             if score > best_score:
                 best_score = score
-                best_pos = word_pos
+                best_pos = absolute_pos
+                
+                # Jeśli znaleziono bardzo dobre dopasowanie, przestań szukać
+                if score >= 95:
+                    break
+            
+            pos += 1
+        
+        if best_score >= threshold:
+            return best_pos, best_score
+        
+        return None, 0
+    
+    # 🔧 POPRAWIONA FUNKCJA - znajduje najlepsze miejsce na separator
+    def find_best_separator_position(text, phrase_position):
+        """
+        Znajdź najlepsze miejsce na separator PRZED frazą.
+        Priorytet: początek akapitu > początek zdania > początek linii > początek słowa
+        """
+        if phrase_position == 0:
+            return 0
+        
+        # Sprawdź różne pozycje wstecz od phrase_position
+        search_back = min(150, phrase_position)
+        start = phrase_position - search_back
+        
+        best_pos = phrase_position
+        best_score = 0
+        
+        # Szukaj najlepszego miejsca
+        for i in range(phrase_position, start - 1, -1):
+            score = 0
+            
+            # Początek tekstu
+            if i == 0:
+                return 0
+            
+            char = text[i-1]
+            prev_char = text[i-2] if i >= 2 else ''
+            
+            # Nowy akapit (dwa entery)
+            if char == '\n' and prev_char == '\n':
+                score = 100
+            # Początek dialogu
+            elif char == '—' or (i >= 2 and text[i-2:i] == '— '):
+                score = 90
+            # Po końcu zdania z enterem
+            elif char == '\n' and i >= 2 and prev_char in '.!?':
+                score = 85
+            # Po końcu zdania
+            elif char in '.!?' and (i >= len(text) or text[i] in ' \n\t'):
+                score = 80
+            # Początek linii
+            elif char == '\n':
+                score = 70
+            # Po spacji (początek słowa)
+            elif char == ' ' and (i >= len(text) or text[i].isalnum()):
+                score = 50
+            # Początek słowa bez spacji
+            elif not char.isalnum() and (i >= len(text) or text[i].isalnum()):
+                score = 40
+            
+            # Preferuj pozycje bliżej frazy
+            distance = phrase_position - i
+            if distance <= 10:
+                score += 20
+            elif distance <= 30:
+                score += 10
+            elif distance <= 50:
+                score += 5
+            
+            if score > best_score:
+                best_score = score
+                best_pos = i
+                
+                # Jeśli znaleziono idealną pozycję (nowy akapit), użyj jej
+                if score >= 100:
+                    break
         
         return best_pos
-    
-    # 🔧 NOWA funkcja pomocnicza
-    def find_nearest_word_boundary(text, position):
-        """Znajdź najbliższą granicę słowa (początek lub koniec)"""
-        
-        # Sprawdź czy jesteśmy już na granicy słowa
-        if position == 0 or position >= len(text):
-            return max(0, min(position, len(text) - 1))
-        
-        if not text[position-1].isalnum() or not text[position].isalnum():
-            return position
-        
-        # Szukaj w obu kierunkach
-        left_boundary = position
-        while left_boundary > 0 and text[left_boundary-1].isalnum():
-            left_boundary -= 1
-        
-        right_boundary = position
-        while right_boundary < len(text) and text[right_boundary].isalnum():
-            right_boundary += 1
-        
-        # Wybierz bliższą granicę
-        if position - left_boundary <= right_boundary - position:
-            return left_boundary
-        else:
-            return right_boundary
     
     # Analizuj każdy plik MP3
     frazy = []
@@ -235,73 +257,44 @@ def run():
     
     print(f"\n📋 Podsumowanie transkrypcji: znaleziono {len(frazy)} fraz z {len(mp3_files)} plików")
     
-    # 🔧 Powrót do poprzedniej wersji z poprawkami
-    def wstaw_entery_z_fuzzy(text, frazy, prog=50):
-        znalezione, nie_znalezione = [], []
+    # 🔧 CAŁKOWICIE PRZEPISANA funkcja wstawiania enterów
+    def wstaw_entery_z_fuzzy(text, frazy, prog=60):
+        """
+        Wstawia separatory w tekście na podstawie znalezionych fraz.
+        Zawsze wstawia separator PRZED pierwszym słowem frazy.
+        """
+        znalezione = []
+        nie_znalezione = []
         new_text = text
-        przesuniecie = 0
-
+        offset = 0  # Przesunięcie spowodowane wstawionymi separatorami
+        
         for idx, item in enumerate(frazy, start=1):
             fraza = item["fraza"].strip()
             plik = item["plik"]
             
-            # Najpierw sprawdź dokładne dopasowanie (case-insensitive)
-            text_fragment = new_text[przesuniecie:].lower()
-            fraza_lower = fraza.lower()
-            pos = text_fragment.find(fraza_lower)
+            # Znajdź frazę w oryginalnym tekście (z uwzględnieniem offset)
+            phrase_pos, score = find_phrase_in_original_text(new_text, fraza, offset, threshold=prog)
             
-            if pos != -1:
-                rough_position = pos + przesuniecie
-                # 🔧 Znajdź lepszą pozycję dla separatora
-                better_position = find_better_position(new_text, rough_position, fraza)
-                separator = f"\n\n\n[{idx}] >>>>>>>>>>>>>>>\n\n"
-                new_text = new_text[:better_position] + separator + new_text[better_position:]
-                przesuniecie = better_position + len(separator)
-                print(f"✅ [DOKŁADNE] [{idx}] ({plik}) '{fraza}' (100.0%)")
-                znalezione.append((plik, fraza, 100.0))
+            if phrase_pos is None:
+                print(f"❌ [{idx}] ({plik}) Brak dopasowania >= {prog}% dla: '{fraza}' (najlepsze: {score:.1f}%)")
+                nie_znalezione.append((plik, fraza))
                 continue
             
-            # Fuzzy matching z lepszą tolerancją błędów
-            najlepszy_score = 0
-            najlepsza_pozycja = -1
+            # Znajdź najlepsze miejsce na separator (przed frazą)
+            separator_pos = find_best_separator_position(new_text, phrase_pos)
             
-            # Podziel tekst na fragmenty po 200 znaków z przesunięciem co 50 znaków
-            fragment_size = 200
-            step = 50
-            pozostaly_tekst = new_text[przesuniecie:]
+            # Wstaw separator
+            separator = f"\n\n\n[{idx}] >>>>>>>>>>>>>>>\n\n"
+            new_text = new_text[:separator_pos] + separator + new_text[separator_pos:]
             
-            for i in range(0, len(pozostaly_tekst) - len(fraza) + 1, step):
-                fragment = pozostaly_tekst[i:i + fragment_size]
-                
-                # Normalizuj dla lepszego dopasowania
-                fraza_norm = normalize_for_matching(fraza)
-                fragment_norm = normalize_for_matching(fragment)
-                
-                # Sprawdź podobieństwo z frazą
-                score = fuzz.partial_ratio(fraza_norm, fragment_norm)
-                
-                # Dodatkowe sprawdzenie - czy pierwsze słowo się zgadza
-                pierwsze_slowo = fraza_norm.split()[0] if fraza_norm.split() else ""
-                if pierwsze_slowo and pierwsze_slowo in fragment_norm:
-                    score += 20  # bonus za dopasowanie pierwszego słowa
-                
-                if score > najlepszy_score:
-                    najlepszy_score = score
-                    rough_pos = przesuniecie + i
-                    # 🔧 Znajdź lepszą pozycję dla separatora
-                    najlepsza_pozycja = find_better_position(new_text, rough_pos, fraza)
+            # Zaktualizuj offset
+            offset = separator_pos + len(separator)
             
-            # Sprawdź czy znaleziono wystarczająco dobre dopasowanie
-            if najlepszy_score >= prog and najlepsza_pozycja != -1:
-                separator = f"\n\n\n[{idx}] >>>>>>>>>>>>>>>\n\n"
-                new_text = new_text[:najlepsza_pozycja] + separator + new_text[najlepsza_pozycja:]
-                przesuniecie = najlepsza_pozycja + len(separator)
-                print(f"✅ [FUZZY] [{idx}] ({plik}) '{fraza}' ({najlepszy_score:.1f}%)")
-                znalezione.append((plik, fraza, najlepszy_score))
-            else:
-                print(f"❌ [{idx}] ({plik}) Brak dopasowania >= {prog}% dla: '{fraza}' (najlepsze: {najlepszy_score:.1f}%)")
-                nie_znalezione.append((plik, fraza))
-
+            # Wyświetl informację o dopasowaniu
+            match_type = "DOKŁADNE" if score == 100.0 else "FUZZY"
+            print(f"✅ [{match_type}] [{idx}] ({plik}) '{fraza}' ({score:.1f}%)")
+            znalezione.append((plik, fraza, score))
+        
         return new_text, znalezione, nie_znalezione
     
     # Wstaw entery
