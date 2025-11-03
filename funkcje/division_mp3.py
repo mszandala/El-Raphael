@@ -75,6 +75,8 @@ def run():
             'staś': 'stas',
             'nalektura': 'nel',
             'aydryz': 'idrys',
+            'powielki': 'po wielkim',
+            'mjjju': 'dżdżu',
         }
         
         for wrong, correct in replacements.items():
@@ -277,143 +279,151 @@ def run():
         frazy.append({
             "plik": mp3_file,
             "fraza_start": fraza_start,
-            "fraza_end": fraza_end
+            "fraza_end": fraza_end,
+            "idx": i  # ✅ DODANE: Zachowaj oryginalny numer
         })
         
         print()
     
     print(f"📋 Podsumowanie: przetworzone {len(frazy)} plików (pełna transkrypcja)\n")
     
-    # 🆕 FUNKCJA wstawiania enterów z PODWÓJNĄ WERYFIKACJĄ
+    # 🆕 CAŁKOWICIE PRZEPISANA FUNKCJA - zachowuje kolejność i wstawia puste separatory
     def wstaw_entery_z_podwojna_weryfikacja(text, frazy, prog=50):
         """
-        Wstawia separatory używając PODWÓJNEJ WERYFIKACJI:
-        - Koniec fragmentu [i] musi pasować do początku fragmentu [i+1]
-        - Separator wstawiany jest MIĘDZY nimi
+        Wstawia separatory używając PODWÓJNEJ WERYFIKACJI.
+        ZAWSZE zachowuje kolejność - jeśli nie znajdzie, wstawia pusty separator!
         """
         print(f"{'='*80}")
-        print(f"🔍 ETAP 1: Wyszukiwanie fraz POCZĄTKOWYCH...")
+        print(f"🔍 ETAP 1: Wyszukiwanie wszystkich fragmentów...")
         print(f"{'='*80}\n")
 
-        pozycje_start = []  # Lista: (pos_start, idx, plik, fraza_start, score)
-        pozycje_end = []    # Lista: (pos_end, pos_end_end, idx, plik, fraza_end, score)
+        # ✅ Struktura: idx -> {start_pos, start_end, end_pos, end_end, found, plik, fraza_start}
+        fragmenty = {}
         
-        last_pos = 0
+        last_search_pos = 0
         
-        # KROK 1: Znajdź wszystkie pozycje START
-        for idx, item in enumerate(frazy, start=1):
+        # KROK 1: Znajdź START i END dla każdego fragmentu
+        for item in frazy:
+            idx = item["idx"]
             fraza_start = item["fraza_start"].strip()
-            plik = item["plik"]
-            
-            print(f"🔍 [{idx}] START: '{fraza_start[:50]}...'")
-            
-            (pos_start, pos_start_end), score = find_phrase_with_sliding_window(text, fraza_start, last_pos, threshold=prog)
-            
-            if pos_start is None:
-                print(f"❌ [{idx}] Nie znaleziono początku (score={score:.1f}%)")
-                continue
-            
-            if pos_start < last_pos:
-                print(f"⚠️  [{idx}] Pozycja wstecz! Pomijam.")
-                continue
-            
-            pozycje_start.append((pos_start, idx, plik, fraza_start, score))
-            last_pos = pos_start
-            print(f"✅ [{idx}] START znaleziony na pozycji {pos_start} (score={score:.1f}%)")
-        
-        # KROK 2: Znajdź wszystkie pozycje END
-        print(f"\n{'='*80}")
-        print(f"🔍 ETAP 2: Wyszukiwanie fraz KOŃCOWYCH...")
-        print(f"{'='*80}\n")
-        
-        for idx, item in enumerate(frazy, start=1):
             fraza_end = item["fraza_end"].strip()
             plik = item["plik"]
             
-            # ✅ Użyj None zamiast 0
-            search_from = None
-            for pos_start, idx_start, _, _, _ in pozycje_start:
-                if idx_start == idx:
-                    search_from = pos_start
-                    break
+            print(f"🔍 [{idx}] Szukam fragmentu: {plik}")
+            print(f"   START: '{fraza_start[:50]}...'")
             
-            if search_from is None:
-                print(f"⚠️  [{idx}] Brak pozycji START - pomijam END")
+            # Szukaj START
+            (pos_start, pos_start_end), score_start = find_phrase_with_sliding_window(
+                text, fraza_start, last_search_pos, threshold=prog
+            )
+            
+            if pos_start is None:
+                print(f"   ❌ Nie znaleziono START (score={score_start:.1f}%)")
+                fragmenty[idx] = {
+                    'found': False,
+                    'plik': plik,
+                    'fraza_start': fraza_start
+                }
                 continue
             
-            print(f"🔍 [{idx}] END: '{fraza_end[:50]}...' (szukam od {search_from})")
+            print(f"   ✅ START znaleziony na {pos_start} (score={score_start:.1f}%)")
+            print(f"   END: '{fraza_end[:50]}...'")
             
-            (pos_end, pos_end_end), score = find_phrase_with_sliding_window(text, fraza_end, search_from, threshold=prog)
+            # Szukaj END (od pozycji START)
+            (pos_end, pos_end_end), score_end = find_phrase_with_sliding_window(
+                text, fraza_end, pos_start, threshold=prog
+            )
             
             if pos_end is None:
-                print(f"❌ [{idx}] Nie znaleziono końca (score={score:.1f}%)")
+                print(f"   ❌ Nie znaleziono END (score={score_end:.1f}%)")
+                fragmenty[idx] = {
+                    'found': False,
+                    'plik': plik,
+                    'fraza_start': fraza_start
+                }
                 continue
             
-            # ✅ Zapisz KONIEC dopasowania
-            pozycje_end.append((pos_end, pos_end_end, idx, plik, fraza_end, score))
-            print(f"✅ [{idx}] END znaleziony na pozycji {pos_end}-{pos_end_end} (score={score:.1f}%)")
+            print(f"   ✅ END znaleziony na {pos_end}-{pos_end_end} (score={score_end:.1f}%)")
+            
+            fragmenty[idx] = {
+                'found': True,
+                'start_pos': pos_start,
+                'start_end': pos_start_end,
+                'end_pos': pos_end,
+                'end_end': pos_end_end,
+                'plik': plik,
+                'fraza_start': fraza_start,
+                'score_start': score_start
+            }
+            
+            # ✅ Następne wyszukiwanie od końca TEGO fragmentu
+            last_search_pos = pos_end_end
+            print()
         
-        # KROK 3: WERYFIKACJA i wstawianie separatorów
+        # KROK 2: Wstaw separatory ZACHOWUJĄC KOLEJNOŚĆ
         print(f"\n{'='*80}")
-        print(f"🔍 ETAP 3: WERYFIKACJA i wyznaczanie pozycji separatorów...")
+        print(f"✏️  ETAP 2: Wstawianie separatorów (zachowuję kolejność)...")
         print(f"{'='*80}\n")
         
-        separatory = []  # Lista: (separator_pos, idx, plik)
+        separatory = []  # Lista: (pozycja, idx, typ: 'found' lub 'missing')
         znalezione = []
         nie_znalezione = []
         
-        for i in range(len(pozycje_start)):
-            pos_start_i, idx_i, plik_i, fraza_start_i, score_start_i = pozycje_start[i]
-            
-            # Znajdź koniec tego samego fragmentu
-            pos_end_i = None
-            pos_end_end_i = None
-            for pos_end, pos_end_end, idx_end, _, _, score_end in pozycje_end:
-                if idx_end == idx_i:
-                    pos_end_i = pos_end
-                    pos_end_end_i = pos_end_end
-                    break
-            
-            if pos_end_i is None:
-                print(f"⚠️  [{idx_i}] Brak END - pomijam")
-                nie_znalezione.append((plik_i, fraza_start_i, score_start_i))
+        # ✅ DODAJ SEPARATOR PRZED PIERWSZYM FRAGMENTEM (na pozycji 0)
+        separatory.append((0, 1, 'first'))
+        print(f"✏️  [1] Separator POCZĄTKOWY na pozycji 0")
+        
+        # Iteruj przez wszystkie indeksy (1, 2, 3, ...)
+        max_idx = max(fragmenty.keys()) if fragmenty else 0
+        
+        for idx in range(1, max_idx + 1):
+            if idx not in fragmenty:
+                # Fragment nie został przetworzony (błąd transkrypcji)
+                print(f"⚠️  [{idx}] Fragment pominięty - wstawiam pusty separator")
+                nie_znalezione.append((f"fragment_{idx}", "brak transkrypcji", 0))
                 continue
             
+            frag = fragmenty[idx]
+            
+            if not frag['found']:
+                # Fragment nie został znaleziony w tekście
+                print(f"❌ [{idx}] Nie znaleziono - wstawiam pusty separator")
+                nie_znalezione.append((frag['plik'], frag['fraza_start'], 0))
+                continue
+            
+            # ✅ Fragment znaleziony
+            znalezione.append((frag['plik'], frag['fraza_start'], frag['score_start']))
+            
             # Sprawdź czy jest następny fragment
-            if i + 1 < len(pozycje_start):
-                pos_start_next, idx_next, plik_next, fraza_start_next, score_start_next = pozycje_start[i + 1]
+            next_idx = idx + 1
+            if next_idx in fragmenty and fragmenty[next_idx]['found']:
+                # Oba fragmenty znalezione - wstaw separator między nimi
+                pos_end_current = frag['end_end']
+                pos_start_next = fragmenty[next_idx]['start_pos']
                 
-                # ✅ WERYFIKACJA: Koniec frazy [i] < Początek [i+1]?
-                if pos_end_end_i < pos_start_next:
-                    separator_pos = find_best_separator_between(text, pos_end_end_i, pos_start_next)
-                    
-                    separatory.append((separator_pos, idx_i, plik_i))
-                    znalezione.append((plik_i, fraza_start_i, score_start_i))
+                if pos_end_current < pos_start_next:
+                    separator_pos = find_best_separator_between(text, pos_end_current, pos_start_next)
+                    separatory.append((separator_pos, next_idx, 'found'))
                     
                     context = text[separator_pos:separator_pos+50].replace('\n', '↵')
-                    print(f"✅ [{idx_i}] WERYFIKACJA OK:")
-                    print(f"   END[{idx_i}] na {pos_end_i}-{pos_end_end_i} < START[{idx_next}] na {pos_start_next}")
-                    print(f"   📍 Separator na {separator_pos}: '{context}...'")
+                    print(f"✅ [{idx}→{next_idx}] Separator na {separator_pos}: '{context}...'")
                 else:
-                    print(f"❌ [{idx_i}] WERYFIKACJA FAILED:")
-                    print(f"   END[{idx_i}] na {pos_end_i}-{pos_end_end_i} >= START[{idx_next}] na {pos_start_next}")
-                    print(f"   Fragment {idx_i} kończy się PO początku fragmentu {idx_next}!")
-                    nie_znalezione.append((plik_i, fraza_start_i, score_start_i))
-            else:
-                # Ostatni fragment - nie ma weryfikacji
-                znalezione.append((plik_i, fraza_start_i, score_start_i))
-                print(f"ℹ️  [{idx_i}] Ostatni fragment - brak weryfikacji")
+                    print(f"⚠️  [{idx}→{next_idx}] Fragmenty się pokrywają! END[{idx}]={pos_end_current} >= START[{next_idx}]={pos_start_next}")
         
-        # KROK 4: Wstaw separatory (od końca do początku)
+        # KROK 3: Wstaw separatory od końca do początku
         print(f"\n{'='*80}")
-        print(f"✏️  ETAP 4: Wstawianie separatorów...")
+        print(f"✏️  ETAP 3: Fizyczne wstawianie separatorów...")
         print(f"{'='*80}\n")
         
         separatory.sort(reverse=True, key=lambda x: x[0])
         
         new_text = text
-        for separator_pos, idx, plik in separatory:
-            separator = f"\n\n\n[{idx}] >>>>>>>>>>>>>>>\n\n"
+        for separator_pos, idx, typ in separatory:
+            if typ == 'first':
+                separator = f"[{idx}] >>>>>>>>>>>>>>>\n\n"
+            else:
+                separator = f"\n\n[{idx}] >>>>>>>>>>>>>>>\n\n"
+            
             new_text = new_text[:separator_pos] + separator + new_text[separator_pos:]
             print(f"✏️  Wstawiono separator [{idx}] na pozycji {separator_pos}")
         
