@@ -341,9 +341,50 @@ def wstaw_entery_z_podwojna_weryfikacja(text, frazy, prog=40, text_file=None):
         print(f"   ✅ END: pozycja {pos_end} (score: {score_end:.1f})")
         print(f"      Kontekst: '{context_end_text[:80]}...'")
         
-        # Sprawdź czy END jest za START
-        if pos_end <= pos_start:
-            print(f"   ❌ END ({pos_end}) jest przed START ({pos_start})!")
+        # ✅ POPRAWKA: Jeśli END == START, to fragment jest krótki
+        if pos_end == pos_start:
+            print(f"   ℹ️  END = START ({pos_end}) → fragment krótki, używam szacowanej długości")
+            
+            # Szacuj długość na podstawie transkrypcji
+            # Zakładamy że ~3 znaki tekstu = 1 znak transkrypcji
+            estimated_length = len(pelna_transkrypcja) * 3
+            pos_end_end = pos_start + estimated_length
+            
+            # Zabezpieczenie - nie przekraczaj końca tekstu
+            if pos_end_end > len(text):
+                pos_end_end = len(text)
+            
+            print(f"   📏 Szacowana długość: {estimated_length} znaków → pozycja {pos_end_end}")
+            
+            # Zapisz pozycję separatora
+            pozycje_separatorow.append({
+                'numer': idx + 1,
+                'pozycja': pos_start,
+                'plik': plik
+            })
+            
+            # Dodaj fragment
+            fragmenty.append({
+                'found': True,
+                'plik': plik,
+                'pos_start': pos_start,
+                'pos_end': pos_end_end,
+                'score_start': score_start,
+                'score_end': score_end,
+                'text': text[pos_start:pos_end_end],
+                'start_ms': item['start_ms'],
+                'end_ms': item['end_ms'],
+                'estimated_end': True  # Oznacz że END został oszacowany
+            })
+            
+            last_search_pos = pos_end_end
+            print(f"   ✅ Fragment dodany (END oszacowany): tekst[{pos_start}:{pos_end_end}]")
+            print()
+            continue
+        
+        # Sprawdź czy END jest PRZED START (to jest błąd)
+        if pos_end < pos_start:
+            print(f"   ❌ END ({pos_end}) jest PRZED START ({pos_start})!")
             fragmenty.append({
                 'found': False,
                 'plik': plik,
