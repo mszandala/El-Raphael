@@ -17,14 +17,17 @@ def podziel_na_fragmenty_z_enterami(plik_mp3, text_file, output_folder="fragment
     with open(text_file, 'r', encoding='utf-8') as f:
         text = f.read()
     
-    # Pobierz listę plików z transkrypcjami
-    frazy = pobierz_frazy_do_wyszukania(text_file)
+    # ✅ POPRAWIONE: Pobierz frazy bezpośrednio z plików MP3
+    frazy = pobierz_frazy_z_mp3(text_file)
     
-    # Wstaw entery w odpowiednich miejscach
-    fragmenty = wstaw_entery_z_podwojna_weryfikacja(text, frazy, prog)
+    # ✅ POPRAWIONE: Przekaż text_file do funkcji
+    fragmenty = wstaw_entery_z_podwojna_weryfikacja(text, frazy, prog, text_file)
     
-    # Ładuj plik MP3
-    audio = AudioSegment.from_mp3(plik_mp3)
+    # Ładuj plik MP3 - jeśli jest przekazany
+    if plik_mp3 and os.path.exists(plik_mp3):
+        audio = AudioSegment.from_mp3(plik_mp3)
+    else:
+        audio = None
     
     # Utwórz folder wyjściowy
     os.makedirs(output_folder, exist_ok=True)
@@ -167,61 +170,67 @@ def find_phrase_with_sliding_window(original_text, search_phrase, start_offset=0
         return (None, None), best_score
 
 
-def pobierz_frazy_do_wyszukania(text_file):
+def pobierz_frazy_z_mp3(text_file):
     """
-    Skanuje folder z transkrypcjami i tworzy listę fraz do wyszukania
+    ✅ NOWA FUNKCJA: Skanuje folder temp/mp3 i transkrybuje pliki przez Whisper
     """
-    # Ustal ścieżkę do folderu z transkrypcjami
-    base_dir = os.path.dirname(text_file)
-    transkrypcje_folder = os.path.join(base_dir, "transkrypcje")
+    import whisper
     
-    if not os.path.exists(transkrypcje_folder):
-        print(f"❌ Folder z transkrypcjami nie istnieje: {transkrypcje_folder}")
+    # Ustal ścieżkę do folderu z MP3
+    base_dir = os.path.dirname(text_file)
+    mp3_folder = os.path.join(base_dir, "mp3")
+    
+    if not os.path.exists(mp3_folder):
+        print(f"❌ Folder z plikami MP3 nie istnieje: {mp3_folder}")
         return []
     
     frazy = []
-    pliki_txt = sorted([f for f in os.listdir(transkrypcje_folder) if f.endswith('.txt')])
+    pliki_mp3 = sorted([f for f in os.listdir(mp3_folder) if f.endswith('.mp3')])
     
-    print(f"📂 Znaleziono {len(pliki_txt)} plików z transkrypcjami")
+    print(f"📂 Znaleziono {len(pliki_mp3)} plików MP3")
+    print(f"🎤 Ładuję model Whisper...")
     
-    for plik in pliki_txt:
-        sciezka = os.path.join(transkrypcje_folder, plik)
+    # Załaduj model Whisper (możesz użyć 'base', 'small', 'medium', 'large')
+    model = whisper.load_model("base")
+    
+    for idx, plik in enumerate(pliki_mp3):
+        sciezka = os.path.join(mp3_folder, plik)
         
         try:
-            with open(sciezka, 'r', encoding='utf-8') as f:
-                tresc = f.read().strip()
+            print(f"🎵 [{idx+1}/{len(pliki_mp3)}] Transkrybuję: {plik}")
             
-            if not tresc:
-                print(f"⚠️  Pusty plik: {plik}")
+            # Transkrybuj przez Whisper
+            result = model.transcribe(sciezka, language="pl")
+            transkrypcja = result["text"].strip()
+            
+            if not transkrypcja:
+                print(f"   ⚠️  Pusta transkrypcja")
                 continue
             
-            # Wyciągnij timestamp z nazwy pliku (format: fragment_XXXX_YYYY.txt)
-            match = re.search(r'fragment_(\d+)_(\d+)', plik)
-            if match:
-                start_ms = int(match.group(1))
-                end_ms = int(match.group(2))
-            else:
-                print(f"⚠️  Nie można wyciągnąć timestampu z: {plik}")
-                continue
+            # Pobierz długość pliku MP3
+            audio = AudioSegment.from_mp3(sciezka)
+            dlugosc_ms = len(audio)
+            
+            print(f"   ✅ Transkrypcja ({len(transkrypcja)} znaków): {transkrypcja[:80]}...")
             
             frazy.append({
                 'plik': plik,
-                'transkrypcja': tresc,
-                'start_ms': start_ms,
-                'end_ms': end_ms
+                'transkrypcja': transkrypcja,
+                'start_ms': 0,  # Każdy plik zaczyna się od 0
+                'end_ms': dlugosc_ms
             })
             
         except Exception as e:
-            print(f"❌ Błąd podczas czytania {plik}: {e}")
+            print(f"   ❌ Błąd podczas transkrypcji {plik}: {e}")
             continue
     
-    print(f"✅ Załadowano {len(frazy)} transkrypcji")
+    print(f"✅ Zatranskrybowano {len(frazy)} plików")
     return frazy
 
 
-def wstaw_entery_z_podwojna_weryfikacja(text, frazy, prog=40):
+def wstaw_entery_z_podwojna_weryfikacja(text, frazy, prog=40, text_file=None):
     """
-    Wstawia entery w tekście bazując na transkrypcjach.
+    Wstawia separatory [XX] >>>>>>>> w tekście bazując na transkrypcjach.
     Używa podwójnej weryfikacji: START i END każdego fragmentu.
     
     ✅ ZMIENIONY DOMYŚLNY PRÓG: 50 → 40
@@ -233,6 +242,14 @@ def wstaw_entery_z_podwojna_weryfikacja(text, frazy, prog=40):
     print(f"🔍 ROZPOCZYNAM WYSZUKIWANIE FRAZ (próg: {prog})")
     print(f"{'='*80}\n")
     
+    # ✅ Sprawdź czy są frazy
+    if not frazy or len(frazy) == 0:
+        print("⚠️  BRAK FRAZ DO WYSZUKANIA")
+        return fragmenty
+    
+    # Lista pozycji do wstawienia separatorów
+    pozycje_separatorow = []
+    
     for idx, item in enumerate(frazy):
         plik = item['plik']
         pelna_transkrypcja = item['transkrypcja']
@@ -241,7 +258,7 @@ def wstaw_entery_z_podwojna_weryfikacja(text, frazy, prog=40):
         slowa = pelna_transkrypcja.split()
         
         if len(slowa) < 5:
-            print(f"⚠️  [{idx}] {plik} - za mało słów ({len(slowa)}), pomijam")
+            print(f"⚠️  [{idx+1}] {plik} - za mało słów ({len(slowa)}), pomijam")
             fragmenty.append({
                 'found': False,
                 'plik': plik,
@@ -249,33 +266,34 @@ def wstaw_entery_z_podwojna_weryfikacja(text, frazy, prog=40):
             })
             continue
         
-        # ✅ Pierwsze 20 słów zamiast 8
-        fraza_start = ' '.join(slowa[:min(20, len(slowa))])
+        # ✅ Pierwsze 8 słów (ORYGINALNIE)
+        fraza_start = ' '.join(slowa[:min(8, len(slowa))])
         
-        # ✅ Ostatnie 20 słów
-        fraza_end = ' '.join(slowa[-min(20, len(slowa)):]) if len(slowa) >= 20 else pelna_transkrypcja
+        # ✅ Ostatnie 8 słów (ORYGINALNIE)
+        fraza_end = ' '.join(slowa[-min(8, len(slowa)):]) if len(slowa) >= 8 else pelna_transkrypcja
         
-        print(f"🔍 [{idx}] Szukam fragmentu: {plik}")
-        print(f"   📝 Znormalizowana START: '{normalize_for_matching(fraza_start)[:80]}'")
-        print(f"   🎯 Pierwsze 5 słów: {' '.join(fraza_start.split()[:5])}")
+        print(f"🔍 [{idx+1}/{len(frazy)}] {plik}")
+        print(f"   📝 Transkrypcja: {pelna_transkrypcja[:100]}...")
+        print(f"   🎯 Pierwsze 8 słów: {fraza_start}")
+        print(f"   🎯 Ostatnie 8 słów: {fraza_end}")
         print(f"   🔍 Szukam od pozycji: {last_search_pos}")
         
         # Szukaj START z NIŻSZYM progiem
         (pos_start, pos_start_end), score_start = find_phrase_with_sliding_window(
-            text, fraza_start, last_search_pos, threshold=40  # ✅ było 50
+            text, fraza_start, last_search_pos, threshold=40
         )
         
         if pos_start is None:
             print(f"   ⚠️  Nie znaleziono START (score: {score_start:.1f})")
-            # Próbuj z JESZCZE krótszą frazą (pierwsze 8 słów) i NIŻSZYM progiem
-            shorter_phrase = ' '.join(fraza_start.split()[:8])
-            print(f"   🔄 Próbuję z krótszą frazą (8 słów)...")
+            # Próbuj z JESZCZE krótszą frazą (pierwsze 5 słów)
+            shorter_phrase = ' '.join(fraza_start.split()[:5])
+            print(f"   🔄 Próbuję z 5 słowami...")
             (pos_start, pos_start_end), score_start = find_phrase_with_sliding_window(
-                text, shorter_phrase, last_search_pos, threshold=30  # ✅ było 40
+                text, shorter_phrase, last_search_pos, threshold=30
             )
             
             if pos_start is None:
-                print(f"   ❌ Nie znaleziono START nawet z krótszą frazą (score: {score_start:.1f})")
+                print(f"   ❌ Nie znaleziono START (score: {score_start:.1f})")
                 fragmenty.append({
                     'found': False,
                     'plik': plik,
@@ -288,8 +306,8 @@ def wstaw_entery_z_podwojna_weryfikacja(text, frazy, prog=40):
         context_start = max(0, pos_start - 30)
         context_end = min(len(text), pos_start + 100)
         context = text[context_start:context_end].replace('\n', '↵')
-        print(f"   ✅ START znaleziony na {pos_start} (score: {score_start:.1f})")
-        print(f"      Kontekst: '{context[:100]}'")
+        print(f"   ✅ START: pozycja {pos_start} (score: {score_start:.1f})")
+        print(f"      Kontekst: '{context[:80]}...'")
         
         # Szukaj END (od pozycji START)
         (pos_end, pos_end_end), score_end = find_phrase_with_sliding_window(
@@ -298,37 +316,30 @@ def wstaw_entery_z_podwojna_weryfikacja(text, frazy, prog=40):
         
         if pos_end is None:
             print(f"   ⚠️  Nie znaleziono END (score: {score_end:.1f})")
-            # ✅ FALLBACK: spróbuj z ostatnimi 10 słowami
-            shorter_end = ' '.join(fraza_end.split()[-10:])
-            print(f"   🔄 Próbuję z krótszym END (10 słów)...")
+            # ✅ FALLBACK: spróbuj z ostatnimi 5 słowami
+            shorter_end = ' '.join(fraza_end.split()[-5:])
+            print(f"   🔄 Próbuję z 5 słowami...")
             (pos_end, pos_end_end), score_end = find_phrase_with_sliding_window(
                 text, shorter_end, pos_start, threshold=30
             )
             
             if pos_end is None:
-                # ✅ OSTATNIA SZANSA: szukaj w większym oknie
-                print(f"   ⚠️  Próbuję większe okno dla END...")
-                (pos_end, pos_end_end), score_end = find_phrase_with_sliding_window(
-                    text, fraza_end, pos_start, threshold=25
-                )
-                
-                if pos_end is None:
-                    print(f"   ❌ Nie znaleziono END nawet z fallback (score: {score_end:.1f})")
-                    fragmenty.append({
-                        'found': False,
-                        'plik': plik,
-                        'fraza_end': fraza_end,
-                        'pos_start': pos_start,
-                        'score_end': score_end
-                    })
-                    continue
+                print(f"   ❌ Nie znaleziono END (score: {score_end:.1f})")
+                fragmenty.append({
+                    'found': False,
+                    'plik': plik,
+                    'fraza_end': fraza_end,
+                    'pos_start': pos_start,
+                    'score_end': score_end
+                })
+                continue
         
         # ✅ Pokaż kontekst końca
         context_end_start = max(0, pos_end - 30)
         context_end_end = min(len(text), pos_end + 100)
         context_end_text = text[context_end_start:context_end_end].replace('\n', '↵')
-        print(f"   ✅ END znaleziony na {pos_end} (score: {score_end:.1f})")
-        print(f"      Kontekst: '{context_end_text[:100]}'")
+        print(f"   ✅ END: pozycja {pos_end} (score: {score_end:.1f})")
+        print(f"      Kontekst: '{context_end_text[:80]}...'")
         
         # Sprawdź czy END jest za START
         if pos_end <= pos_start:
@@ -342,6 +353,13 @@ def wstaw_entery_z_podwojna_weryfikacja(text, frazy, prog=40):
             })
             continue
         
+        # ✅ Zapisz pozycję separatora
+        pozycje_separatorow.append({
+            'numer': idx + 1,
+            'pozycja': pos_start,
+            'plik': plik
+        })
+        
         # Sukces!
         fragmenty.append({
             'found': True,
@@ -350,55 +368,93 @@ def wstaw_entery_z_podwojna_weryfikacja(text, frazy, prog=40):
             'pos_end': pos_end_end,
             'score_start': score_start,
             'score_end': score_end,
-            'text': text[pos_start:pos_end_end]
+            'text': text[pos_start:pos_end_end],
+            'start_ms': item['start_ms'],
+            'end_ms': item['end_ms']
         })
         
         # Aktualizuj pozycję dla następnego wyszukiwania
         last_search_pos = pos_end_end
         
-        print(f"   ✅ Fragment dodany: {pos_start} → {pos_end_end}")
+        print(f"   ✅ Fragment znaleziony: tekst[{pos_start}:{pos_end_end}]")
         print()
+    
+    # ✅ WSTAW separatory w tekście
+    if pozycje_separatorow and text_file:
+        print(f"\n{'='*80}")
+        print(f"📝 WSTAWIAM SEPARATORY W TEKŚCIE")
+        print(f"{'='*80}\n")
+        
+        # Sortuj od końca, żeby pozycje się nie zmieniały przy wstawianiu
+        pozycje_separatorow.sort(key=lambda x: x['pozycja'], reverse=True)
+        
+        tekst_z_separatorami = text
+        for sep in pozycje_separatorow:
+            separator = f"\n\n[{sep['numer']:02d}] >>>>>>>>>>>>\n\n"
+            tekst_z_separatorami = (
+                tekst_z_separatorami[:sep['pozycja']] + 
+                separator + 
+                tekst_z_separatorami[sep['pozycja']:]
+            )
+            print(f"✅ Wstawiono separator [{sep['numer']:02d}] na pozycji {sep['pozycja']}")
+        
+        # ✅ POPRAWIONE: Zapisz jako _z_enterami.txt
+        output_text_file = text_file.replace('.txt', '_z_enterami.txt')
+        with open(output_text_file, 'w', encoding='utf-8') as f:
+            f.write(tekst_z_separatorami)
+        print(f"\n💾 Zapisano tekst z separatorami: {output_text_file}")
     
     # Podsumowanie
     znalezione = sum(1 for f in fragmenty if f.get('found', False))
-    print(f"\n{'='*80}")
-    print(f"📊 PODSUMOWANIE: Znaleziono {znalezione}/{len(fragmenty)} fragmentów ({znalezione/len(fragmenty)*100:.1f}%)")
-    print(f"{'='*80}\n")
+    
+    if len(fragmenty) > 0:
+        procent = znalezione / len(fragmenty) * 100
+        print(f"\n{'='*80}")
+        print(f"📊 PODSUMOWANIE: Znaleziono {znalezione}/{len(fragmenty)} fragmentów ({procent:.1f}%)")
+        print(f"{'='*80}\n")
+    else:
+        print(f"\n{'='*80}")
+        print(f"📊 PODSUMOWANIE: Brak fragmentów")
+        print(f"{'='*80}\n")
     
     return fragmenty
 
 
 def utworz_fragmenty_mp3(audio, fragmenty, output_folder):
     """
-    Wycina fragmenty audio na podstawie znalezionych pozycji w tekście
+    ✅ POPRAWIONE: Kopiuje pliki MP3 zamiast wycinać z jednego dużego
     """
     print(f"\n{'='*80}")
-    print(f"✂️  TWORZĘ FRAGMENTY MP3")
+    print(f"✂️  KOPIUJĘ FRAGMENTY MP3")
     print(f"{'='*80}\n")
     
     utworzone = 0
     
     for idx, fragment in enumerate(fragmenty):
         if not fragment.get('found', False):
-            print(f"⏭️  [{idx}] Pomijam {fragment['plik']} - nie znaleziono w tekście")
+            print(f"⏭️  [{idx+1}] Pomijam {fragment['plik']} - nie znaleziono w tekście")
             continue
         
-        start_ms = fragment.get('start_ms', 0)
-        end_ms = fragment.get('end_ms', len(audio))
+        # Pobierz oryginalny plik MP3
+        base_dir = os.path.dirname(output_folder)
+        mp3_source = os.path.join(base_dir, "mp3", fragment['plik'])
         
-        # Wytnij fragment
-        fragment_audio = audio[start_ms:end_ms]
+        if not os.path.exists(mp3_source):
+            print(f"   ❌ Nie znaleziono pliku źródłowego: {mp3_source}")
+            continue
         
-        # Zapisz
-        output_path = os.path.join(output_folder, fragment['plik'].replace('.txt', '.mp3'))
-        fragment_audio.export(output_path, format="mp3")
+        # Skopiuj do folderu wyjściowego
+        output_path = os.path.join(output_folder, fragment['plik'])
+        
+        import shutil
+        shutil.copy2(mp3_source, output_path)
         
         utworzone += 1
-        dlugosc = (end_ms - start_ms) / 1000
-        print(f"✅ [{idx}] Utworzono: {fragment['plik'].replace('.txt', '.mp3')} ({dlugosc:.1f}s)")
+        dlugosc = (fragment['end_ms'] - fragment['start_ms']) / 1000
+        print(f"✅ [{idx+1}] Skopiowano: {fragment['plik']} ({dlugosc:.1f}s)")
     
     print(f"\n{'='*80}")
-    print(f"📊 Utworzono {utworzone} fragmentów MP3")
+    print(f"📊 Skopiowano {utworzone} fragmentów MP3")
     print(f"{'='*80}\n")
     
     return utworzone
@@ -413,31 +469,15 @@ def run():
     # Ustal ścieżki
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     
-    # Znajdź plik MP3 w folderze temp/mp3
-    mp3_folder = os.path.join(base_dir, "temp", "mp3")
-    if not os.path.exists(mp3_folder):
-        print(f"❌ Folder nie istnieje: {mp3_folder}")
-        return
+    # ✅ NIE SZUKAMY już jednego dużego pliku MP3!
+    # Małe pliki są w temp/mp3/
     
-    pliki_mp3 = [f for f in os.listdir(mp3_folder) if f.endswith('.mp3')]
-    
-    if not pliki_mp3:
-        print(f"❌ Brak plików MP3 w folderze: {mp3_folder}")
-        return
-    
-    # Użyj pierwszego pliku MP3
-    plik_mp3 = os.path.join(mp3_folder, pliki_mp3[0])
-    print(f"📁 Plik MP3: {plik_mp3}")
-    
-    # ✅ POPRAWIONE: Szukaj pliku tekstowego w formacie ROZDZIAŁ_LICZBA.txt
+    # ✅ Szukaj pliku tekstowego w formacie ROZDZIAŁ_LICZBA.txt
     temp_folder = os.path.join(base_dir, "temp")
     
-    # Wzorzec: ROZDZIAŁ_ + cyfry rzymskie lub arabskie + .txt
-    # np: ROZDZIAŁ_XI.txt, ROZDZIAŁ_11.txt, ROZDZIAŁ_I.txt
     text_files = []
     for f in os.listdir(temp_folder):
         if f.endswith('.txt'):
-            # Sprawdź czy nazwa pasuje do wzorca ROZDZIAŁ_XXX.txt
             match = re.match(r'ROZDZIA[ŁL]_([IVXLCDM0-9]+)\.txt', f, re.IGNORECASE)
             if match:
                 text_files.append(f)
@@ -445,20 +485,23 @@ def run():
     if not text_files:
         print(f"❌ Brak plików tekstowych w folderze: {temp_folder}")
         print(f"   Szukam plików w formacie: ROZDZIAŁ_[liczba].txt")
-        print(f"   Przykłady: ROZDZIAŁ_XI.txt, ROZDZIAŁ_11.txt, ROZDZIAŁ_I.txt")
-        
-        # Pokaż wszystkie pliki .txt w folderze dla diagnostyki
-        all_txt = [f for f in os.listdir(temp_folder) if f.endswith('.txt')]
-        if all_txt:
-            print(f"\n   Znalezione pliki .txt (które NIE pasują do wzorca):")
-            for f in all_txt:
-                print(f"     - {f}")
-        
         return
     
-    # Użyj pierwszego znalezionego pliku
     text_file = os.path.join(temp_folder, text_files[0])
     print(f"📄 Plik tekstowy: {text_file}")
+    
+    # Sprawdź folder z MP3
+    mp3_folder = os.path.join(temp_folder, "mp3")
+    if not os.path.exists(mp3_folder):
+        print(f"❌ Folder z plikami MP3 nie istnieje: {mp3_folder}")
+        return
+    
+    pliki_mp3 = [f for f in os.listdir(mp3_folder) if f.endswith('.mp3')]
+    if not pliki_mp3:
+        print(f"❌ Brak plików MP3 w folderze: {mp3_folder}")
+        return
+    
+    print(f"📁 Folder MP3: {mp3_folder} ({len(pliki_mp3)} plików)")
     
     # Folder wyjściowy
     output_folder = os.path.join(base_dir, "temp", "fragmenty")
@@ -466,15 +509,15 @@ def run():
     
     # Uruchom podział
     print(f"\n{'='*80}")
-    print(f"🚀 ROZPOCZYNAM PODZIAŁ MP3 NA FRAGMENTY")
+    print(f"🚀 ROZPOCZYNAM PRZETWARZANIE")
     print(f"{'='*80}\n")
     
     try:
         fragmenty = podziel_na_fragmenty_z_enterami(
-            plik_mp3=plik_mp3,
+            plik_mp3=None,  # Nie potrzebujemy jednego dużego pliku
             text_file=text_file,
             output_folder=output_folder,
-            prog=40  # Próg dopasowania
+            prog=40
         )
         
         print(f"\n{'='*80}")
