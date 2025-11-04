@@ -429,14 +429,35 @@ def run():
     plik_mp3 = os.path.join(mp3_folder, pliki_mp3[0])
     print(f"📁 Plik MP3: {plik_mp3}")
     
-    # Znajdź plik tekstowy (.yxy)
-    text_files = [f for f in os.listdir(base_dir) if f.endswith('.yxy')]
+    # ✅ POPRAWIONE: Szukaj pliku tekstowego w formacie ROZDZIAŁ_LICZBA.txt
+    temp_folder = os.path.join(base_dir, "temp")
+    
+    # Wzorzec: ROZDZIAŁ_ + cyfry rzymskie lub arabskie + .txt
+    # np: ROZDZIAŁ_XI.txt, ROZDZIAŁ_11.txt, ROZDZIAŁ_I.txt
+    text_files = []
+    for f in os.listdir(temp_folder):
+        if f.endswith('.txt'):
+            # Sprawdź czy nazwa pasuje do wzorca ROZDZIAŁ_XXX.txt
+            match = re.match(r'ROZDZIA[ŁL]_([IVXLCDM0-9]+)\.txt', f, re.IGNORECASE)
+            if match:
+                text_files.append(f)
     
     if not text_files:
-        print(f"❌ Brak plików .yxy w folderze: {base_dir}")
+        print(f"❌ Brak plików tekstowych w folderze: {temp_folder}")
+        print(f"   Szukam plików w formacie: ROZDZIAŁ_[liczba].txt")
+        print(f"   Przykłady: ROZDZIAŁ_XI.txt, ROZDZIAŁ_11.txt, ROZDZIAŁ_I.txt")
+        
+        # Pokaż wszystkie pliki .txt w folderze dla diagnostyki
+        all_txt = [f for f in os.listdir(temp_folder) if f.endswith('.txt')]
+        if all_txt:
+            print(f"\n   Znalezione pliki .txt (które NIE pasują do wzorca):")
+            for f in all_txt:
+                print(f"     - {f}")
+        
         return
     
-    text_file = os.path.join(base_dir, text_files[0])
+    # Użyj pierwszego znalezionego pliku
+    text_file = os.path.join(temp_folder, text_files[0])
     print(f"📄 Plik tekstowy: {text_file}")
     
     # Folder wyjściowy
