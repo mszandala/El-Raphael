@@ -402,3 +402,74 @@ def utworz_fragmenty_mp3(audio, fragmenty, output_folder):
     print(f"{'='*80}\n")
     
     return utworzone
+
+
+def run():
+    """
+    Główna funkcja uruchamiająca proces podziału MP3 na fragmenty
+    """
+    import os
+    
+    # Ustal ścieżki
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
+    # Znajdź plik MP3 w folderze temp/mp3
+    mp3_folder = os.path.join(base_dir, "temp", "mp3")
+    if not os.path.exists(mp3_folder):
+        print(f"❌ Folder nie istnieje: {mp3_folder}")
+        return
+    
+    pliki_mp3 = [f for f in os.listdir(mp3_folder) if f.endswith('.mp3')]
+    
+    if not pliki_mp3:
+        print(f"❌ Brak plików MP3 w folderze: {mp3_folder}")
+        return
+    
+    # Użyj pierwszego pliku MP3
+    plik_mp3 = os.path.join(mp3_folder, pliki_mp3[0])
+    print(f"📁 Plik MP3: {plik_mp3}")
+    
+    # Znajdź plik tekstowy (.yxy)
+    text_files = [f for f in os.listdir(base_dir) if f.endswith('.yxy')]
+    
+    if not text_files:
+        print(f"❌ Brak plików .yxy w folderze: {base_dir}")
+        return
+    
+    text_file = os.path.join(base_dir, text_files[0])
+    print(f"📄 Plik tekstowy: {text_file}")
+    
+    # Folder wyjściowy
+    output_folder = os.path.join(base_dir, "temp", "fragmenty")
+    print(f"📂 Folder wyjściowy: {output_folder}")
+    
+    # Uruchom podział
+    print(f"\n{'='*80}")
+    print(f"🚀 ROZPOCZYNAM PODZIAŁ MP3 NA FRAGMENTY")
+    print(f"{'='*80}\n")
+    
+    try:
+        fragmenty = podziel_na_fragmenty_z_enterami(
+            plik_mp3=plik_mp3,
+            text_file=text_file,
+            output_folder=output_folder,
+            prog=40  # Próg dopasowania
+        )
+        
+        print(f"\n{'='*80}")
+        print(f"✅ ZAKOŃCZONO POMYŚLNIE")
+        print(f"{'='*80}\n")
+        
+        return fragmenty
+        
+    except Exception as e:
+        print(f"\n{'='*80}")
+        print(f"❌ BŁĄD: {e}")
+        print(f"{'='*80}\n")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+if __name__ == "__main__":
+    run()
