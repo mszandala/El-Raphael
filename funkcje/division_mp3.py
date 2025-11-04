@@ -17,10 +17,10 @@ def podziel_na_fragmenty_z_enterami(plik_mp3, text_file, output_folder="fragment
     with open(text_file, 'r', encoding='utf-8') as f:
         text = f.read()
     
-    # ✅ POPRAWIONE: Pobierz frazy bezpośrednio z plików MP3
+    # Pobierz frazy bezpośrednio z plików MP3
     frazy = pobierz_frazy_z_mp3(text_file)
     
-    # ✅ POPRAWIONE: Przekaż text_file do funkcji
+    # Wstaw entery z podwójną weryfikacją
     fragmenty = wstaw_entery_z_podwojna_weryfikacja(text, frazy, prog, text_file)
     
     # Ładuj plik MP3 - jeśli jest przekazany
@@ -40,51 +40,70 @@ def podziel_na_fragmenty_z_enterami(plik_mp3, text_file, output_folder="fragment
 
 def normalize_for_matching(text):
     """
-    Normalizuje tekst do porównywania (lowercase, bez znaków specjalnych, polskie formy)
+    ✅ ULEPSZONA normalizacja - bardziej agresywna
     """
     text = text.lower()
     
-    # ✅ Usuń myślniki PRZED innymi znakami
+    # Usuń myślniki
     text = text.replace('—', ' ').replace('–', ' ').replace('-', ' ')
     
-    # ✅ Usuń wszystkie znaki interpunkcyjne (zachowaj polskie znaki)
+    # Usuń wszystkie znaki interpunkcyjne (zachowaj polskie znaki)
     text = re.sub(r'[^\w\sąćęłńóśźżĄĆĘŁŃÓŚŹŻ]', ' ', text)
     
-    # ✅ Normalizuj wielokrotne spacje
+    # Normalizuj wielokrotne spacje
     text = re.sub(r'\s+', ' ', text).strip()
     
-    # ✅ ROZSZERZONE zamienniki dla polskich form
+    # ✅ ROZSZERZONE zamienniki - dodaj typowe błędy Whisper
     replacements = {
-        # Formy czasowników
-        'tys': 'ty',
-        'jes': 'jest',
-        'byś': 'by',
-        'cobyś': 'coby',
-        'jakis': 'jaki',
-        'jakiś': 'jaki',
+        # Błędy Whisper dla nazwisk
+        'roli są': 'rawlison',
+        'rolison': 'rawlison',
+        'rolyson': 'rawlison',
+        'panorolicon': 'pan rawlison',
+        'panrolyson': 'pan rawlison',
+        'kupantarkowski': 'pan tarkowski',
         
-        # Formy rzeczowników
-        'koszałek opałek': 'koszałek opałek',
-        'koszałek opałka': 'koszałek opałek',
-        'koszałka opałka': 'koszałek opałek',
-        'koszałkiem opałkiem': 'koszałek opałek',
+        # Błędy nazw miejsc
+        'lfhn': 'el fachen',
+        'elfhn': 'el fachen',
+        'medinet': 'medinet',
+        'medinę': 'medinet',
+        'medinu': 'medinet',
+        'elwasta': 'el wasta',
+        'el wasta': 'el wasta',
+        'elgarak': 'el gharak',
+        'el garak': 'el gharak',
+        'gara k': 'el gharak',
         
-        # Czasowniki mówienia
-        'odpowiedział': 'powiedział',
-        'rzekł': 'powiedział',
-        'rzecze': 'powiedział',
-        'odparł': 'powiedział',
-        'odrzekł': 'powiedział',
+        # Błędy imion
+        'nel': 'nel',
+        'nell': 'nel',
+        'staś': 'stas',
+        'stać': 'stas',
+        'ustasia': 'stasia',
         
-        # Znane błędy Whisper
+        # Błędy słów arabskich
+        'chami': 'chamis',
+        'hamis': 'chamis',
+        'hamiz': 'chamis',
+        'idr': 'idrys',
         'idry': 'idrys',
-        'gebhr': 'gebr',
-        'nalektura': 'nel',
+        'gebr': 'gebhr',
+        'geber': 'gebhr',
+        
+        # Czasowniki
+        'odpowiedział': 'powiedzial',
+        'rzekł': 'powiedzial',
+        'rzecze': 'powiedzial',
+        'ozwał się': 'powiedzial',
+        'odparł': 'powiedzial',
         
         # Inne częste formy
         'więc': 'wiec',
         'cóż': 'coz',
         'jakże': 'jakze',
+        'żeby': 'zeby',
+        'gdyż': 'gdyz',
     }
     
     for wrong, correct in replacements.items():
@@ -93,125 +112,126 @@ def normalize_for_matching(text):
     return text
 
 
-def find_phrase_with_sliding_window(original_text, search_phrase, start_offset=0, threshold=50):
+def find_phrase_with_sliding_window(original_text, search_phrase, start_offset=0, threshold=40):
     """
-    Znajduje frazę używając sliding window + fuzzy matching z adaptacyjnymi progami
-    
-    Returns:
-        tuple: ((start_pos, end_pos), score) lub ((None, None), best_score) jeśli nie znaleziono
+    ✅ PRZEPISANA funkcja - lepsze dopasowanie + szukanie granic słów
     """
     if not search_phrase or len(search_phrase) < 3:
         return (None, None), 0
 
     phrase_norm = normalize_for_matching(search_phrase)
     phrase_words = phrase_norm.split()
-    words_count = len(phrase_words)
-
-    # ✅ ZWIĘKSZONE OKNO
-    window_size = max(800, len(search_phrase) * 40)
-    step_size = max(15, window_size // 15)
     
-    # ✅ ADAPTACYJNY PRÓG
-    if words_count < 10:
-        adaptive_threshold = min(70, threshold + 10)
-    else:
-        adaptive_threshold = threshold
+    if len(phrase_words) == 0:
+        return (None, None), 0
 
     search_text = original_text[start_offset:]
+    search_norm = normalize_for_matching(search_text)
     
-    # ✅ DIAGNOSTYKA: Sprawdź czy jest tekst do przeszukania
-    if len(search_text) == 0:
-        print(f"      ⚠️  BRAK TEKSTU od pozycji {start_offset} (koniec pliku: {len(original_text)} znaków)")
+    if len(search_norm) == 0:
         return (None, None), 0
     
-    # ✅ POPRAWKA: Jeśli pozostały tekst jest krótki, przeszukaj cały
-    if len(search_text) <= window_size:
-        print(f"      ℹ️  Pozostały tekst krótki ({len(search_text)} znaków) - przeszukuję całość")
-        
-        window = search_text
-        window_norm = normalize_for_matching(window)
-        
-        score_partial = fuzz.partial_ratio(phrase_norm, window_norm)
-        
-        try:
-            score_token = fuzz.token_set_ratio(phrase_norm, window_norm)
-            score_sort = fuzz.token_sort_ratio(phrase_norm, window_norm)
-        except Exception:
-            score_token = 0
-            score_sort = 0
-        
-        score = (score_partial * 0.5 + score_token * 0.3 + score_sort * 0.2)
-        
-        # Bonusy
-        if phrase_words and len(phrase_words) > 0:
-            first_word = phrase_words[0]
-            if first_word in window_norm.split():
-                score = min(100, score + 10)
-            
-            if len(phrase_words) >= 3:
-                first_three = ' '.join(phrase_words[:3])
-                if first_three in window_norm:
-                    score = min(100, score + 15)
-        
-        if score >= adaptive_threshold:
-            return (start_offset, start_offset + len(search_phrase)), score
-        else:
-            return (None, None), score
+    # ✅ Zwiększ okno dla lepszego dopasowania
+    window_size = max(len(search_phrase) * 5, 500)
+    step_size = 10  # Mniejszy krok = dokładniejsze szukanie
     
-    # ✅ Standardowe przeszukiwanie z sliding window
-    max_start = len(search_text) - window_size
-
-    best_pos_start = None
-    best_pos_end = None
     best_score = 0
-
+    best_pos = None
+    
+    # ✅ Szukaj po znormalizowanym tekście
     i = 0
+    max_start = len(search_norm) - len(phrase_norm)
+    
     while i <= max_start:
-        window = search_text[i:i + window_size]
-        window_norm = normalize_for_matching(window)
-
-        score_partial = fuzz.partial_ratio(phrase_norm, window_norm)
+        window = search_norm[i:i + window_size]
         
-        try:
-            score_token = fuzz.token_set_ratio(phrase_norm, window_norm)
-            score_sort = fuzz.token_sort_ratio(phrase_norm, window_norm)
-        except Exception:
-            score_token = 0
-            score_sort = 0
+        # Użyj różnych metod dopasowania
+        score_partial = fuzz.partial_ratio(phrase_norm, window)
+        score_token = fuzz.token_set_ratio(phrase_norm, window)
         
-        score = (score_partial * 0.5 + score_token * 0.3 + score_sort * 0.2)
-
-        if phrase_words and len(phrase_words) > 0:
-            first_word = phrase_words[0]
-            if first_word in window_norm.split():
-                score = min(100, score + 10)
-            
-            if len(phrase_words) >= 3:
-                first_three = ' '.join(phrase_words[:3])
-                if first_three in window_norm:
-                    score = min(100, score + 15)
-
+        # Średnia ważona
+        score = score_partial * 0.7 + score_token * 0.3
+        
+        # Bonus za dokładne dopasowanie początku
+        if window.startswith(phrase_words[0]):
+            score += 10
+        
         if score > best_score:
             best_score = score
-            best_pos_start = start_offset + i
-            phrase_len_estimate = len(search_phrase)
-            best_pos_end = best_pos_start + phrase_len_estimate
-
+            best_pos = i
+        
         i += step_size
-
-    if best_score >= adaptive_threshold:
-        return (best_pos_start, best_pos_end), best_score
-    else:
+    
+    if best_score < threshold:
         return (None, None), best_score
+    
+    # ✅ Znajdź rzeczywistą pozycję w oryginalnym tekście
+    # Musimy przeliczyć pozycję ze znormalizowanego na oryginalny tekst
+    real_pos = map_normalized_to_original(search_text, search_norm, best_pos)
+    
+    if real_pos is None:
+        return (None, None), best_score
+    
+    # ✅ Znajdź granicę słowa (początek zdania/akapitu)
+    real_start = start_offset + real_pos
+    
+    # Szukaj początku zdania (wielka litera po kropce/enterze)
+    for j in range(max(0, real_start - 100), real_start + 50):
+        if j >= len(original_text):
+            break
+        
+        # Sprawdź czy to początek akapitu
+        if j == 0 or (j > 0 and original_text[j-1] == '\n'):
+            if original_text[j].isupper() or original_text[j] in '—"':
+                real_start = j
+                break
+        
+        # Sprawdź czy to początek zdania
+        if j > 0 and original_text[j-1] in '.!?' and original_text[j] == ' ':
+            if j+1 < len(original_text) and original_text[j+1].isupper():
+                real_start = j + 1
+                break
+    
+    # Oszacuj długość na podstawie transkrypcji
+    estimated_length = len(search_phrase) * 2  # Mnożnik bezpieczny
+    real_end = min(len(original_text), real_start + estimated_length)
+    
+    return (real_start, real_end), best_score
+
+
+def map_normalized_to_original(original_text, normalized_text, norm_pos):
+    """
+    ✅ NOWA FUNKCJA: Mapuje pozycję ze znormalizowanego tekstu na oryginalny
+    """
+    if norm_pos >= len(normalized_text):
+        return None
+    
+    # Znajdź fragment znormalizowanego tekstu wokół pozycji
+    search_window = normalized_text[max(0, norm_pos-10):norm_pos+50]
+    
+    # Znormalizuj oryginalny tekst fragmentami i porównaj
+    best_match_pos = None
+    best_match_score = 0
+    
+    for i in range(len(original_text) - len(search_window)):
+        fragment = original_text[i:i+len(search_window)]
+        fragment_norm = normalize_for_matching(fragment)
+        
+        score = fuzz.ratio(search_window, fragment_norm)
+        
+        if score > best_match_score:
+            best_match_score = score
+            best_match_pos = i
+    
+    return best_match_pos
 
 
 def pobierz_frazy_z_mp3(text_file):
     """
-    ✅ NOWA FUNKCJA: Skanuje folder temp/mp3 i transkrybuje pliki przez Whisper
+    Skanuje folder temp/mp3 i transkrybuje pliki przez Whisper
     """
     import whisper
     
-    # Ustal ścieżkę do folderu z MP3
     base_dir = os.path.dirname(text_file)
     mp3_folder = os.path.join(base_dir, "mp3")
     
@@ -225,7 +245,6 @@ def pobierz_frazy_z_mp3(text_file):
     print(f"📂 Znaleziono {len(pliki_mp3)} plików MP3")
     print(f"🎤 Ładuję model Whisper...")
     
-    # Załaduj model Whisper (możesz użyć 'base', 'small', 'medium', 'large')
     model = whisper.load_model("base")
     
     for idx, plik in enumerate(pliki_mp3):
@@ -234,23 +253,17 @@ def pobierz_frazy_z_mp3(text_file):
         try:
             print(f"🎵 [{idx+1}/{len(pliki_mp3)}] Transkrybuję: {plik}")
             
-            # Transkrybuj przez Whisper
             result = model.transcribe(sciezka, language="pl")
             transkrypcja = result["text"].strip()
-            
-            # ✅ DIAGNOSTYKA: Pokaż CAŁĄ transkrypcję
-            print(f"   📝 PEŁNA transkrypcja ({len(transkrypcja)} znaków):")
-            print(f"      {transkrypcja}")
             
             if not transkrypcja:
                 print(f"   ⚠️  Pusta transkrypcja - POMIJAM")
                 continue
             
-            # Pobierz długość pliku MP3
             audio = AudioSegment.from_mp3(sciezka)
             dlugosc_ms = len(audio)
             
-            print(f"   ✅ Dodano do listy fraz (długość audio: {dlugosc_ms}ms)")
+            print(f"   ✅ \"{transkrypcja[:60]}...\"")
             
             frazy.append({
                 'plik': plik,
@@ -261,9 +274,6 @@ def pobierz_frazy_z_mp3(text_file):
             
         except Exception as e:
             print(f"   ❌ Błąd podczas transkrypcji {plik}: {e}")
-            import traceback
-            traceback.print_exc()
-            continue
     
     print(f"✅ Zatranskrybowano {len(frazy)} plików")
     return frazy
@@ -271,34 +281,30 @@ def pobierz_frazy_z_mp3(text_file):
 
 def wstaw_entery_z_podwojna_weryfikacja(text, frazy, prog=40, text_file=None):
     """
-    Wstawia separatory [XX] >>>>>>>> w tekście bazując na transkrypcjach.
+    ✅ PRZEPISANA funkcja - lepsza logika dzielenia
     """
     fragmenty = []
     last_search_pos = 0
     
     print(f"\n{'='*80}")
-    print(f"🔍 ROZPOCZYNAM WYSZUKIWANIE FRAZ (próg: {prog})")
-    print(f"📊 Długość tekstu: {len(text)} znaków (~{len(text.split())} słów)")
+    print(f"🔍 ROZPOCZYNAM WYSZUKIWANIE FRAZ")
+    print(f"📊 Długość tekstu: {len(text)} znaków")
     print(f"📊 Liczba fragmentów MP3: {len(frazy)}")
     print(f"{'='*80}\n")
     
-    # ✅ Sprawdź czy są frazy
-    if not frazy or len(frazy) == 0:
+    if not frazy:
         print("⚠️  BRAK FRAZ DO WYSZUKANIA")
         return fragmenty
     
-    # Lista pozycji do wstawienia separatorów
     pozycje_separatorow = []
     
     for idx, item in enumerate(frazy):
         plik = item['plik']
-        pelna_transkrypcja = item['transkrypcja']
+        transkrypcja = item['transkrypcja']
         
-        # Podziel transkrypcję na słowa
-        slowa = pelna_transkrypcja.split()
-        
-        if len(slowa) < 5:
-            print(f"⚠️  [{idx+1}] {plik} - za mało słów ({len(slowa)}), pomijam")
+        # Pomiń zbyt krótkie transkrypcje
+        if len(transkrypcja.split()) < 3:
+            print(f"⚠️  [{idx+1}] {plik} - za krótka transkrypcja, pomijam")
             fragmenty.append({
                 'found': False,
                 'plik': plik,
@@ -306,134 +312,50 @@ def wstaw_entery_z_podwojna_weryfikacja(text, frazy, prog=40, text_file=None):
             })
             continue
         
-        # ✅ Pierwsze 8 słów
-        fraza_start = ' '.join(slowa[:min(8, len(slowa))])
-        
-        # ✅ Ostatnie 8 słów
-        fraza_end = ' '.join(slowa[-min(8, len(slowa)):]) if len(slowa) >= 8 else pelna_transkrypcja
-        
         print(f"🔍 [{idx+1}/{len(frazy)}] {plik}")
-        print(f"   📝 Transkrypcja: {pelna_transkrypcja[:100]}...")
-        print(f"   🎯 Pierwsze 8 słów: {fraza_start}")
-        print(f"   🎯 Ostatnie 8 słów: {fraza_end}")
-        print(f"   🔍 Szukam od pozycji: {last_search_pos} (pozostało {len(text) - last_search_pos} znaków)")
+        print(f"   📝 \"{transkrypcja[:80]}...\"")
         
-        # ✅ DODATKOWA LOGIKA: Jeśli brak tekstu, resetuj pozycję
-        if last_search_pos >= len(text):
-            print(f"   ⚠️  Pozycja wyszukiwania poza tekstem! Resetuję do początku.")
-            last_search_pos = 0
-        
-        # Szukaj START
-        (pos_start, pos_start_end), score_start = find_phrase_with_sliding_window(
-            text, fraza_start, last_search_pos, threshold=40
+        # ✅ Szukaj CAŁEJ transkrypcji (nie tylko początku/końca)
+        (pos_start, pos_end), score = find_phrase_with_sliding_window(
+            text, transkrypcja, last_search_pos, threshold=35
         )
         
         if pos_start is None:
-            print(f"   ⚠️  Nie znaleziono START (score: {score_start:.1f})")
-            # Próbuj z krótszą frazą
-            shorter_phrase = ' '.join(fraza_start.split()[:5])
-            print(f"   🔄 Próbuję z 5 słowami...")
-            (pos_start, pos_start_end), score_start = find_phrase_with_sliding_window(
-                text, shorter_phrase, last_search_pos, threshold=30
+            print(f"   ❌ Nie znaleziono (score: {score:.1f})")
+            
+            # ✅ Spróbuj z pierwszymi 10 słowami
+            shorter = ' '.join(transkrypcja.split()[:10])
+            print(f"   🔄 Próbuję z początkiem (10 słów)...")
+            (pos_start, pos_end), score = find_phrase_with_sliding_window(
+                text, shorter, last_search_pos, threshold=30
             )
             
             if pos_start is None:
-                print(f"   ❌ Nie znaleziono START (score: {score_start:.1f})")
+                print(f"   ❌ Nie znaleziono (score: {score:.1f})")
                 fragmenty.append({
                     'found': False,
                     'plik': plik,
-                    'fraza_start': fraza_start,
-                    'score_start': score_start
+                    'reason': 'nie_znaleziono'
                 })
                 continue
         
-        # ✅ Pokaż kontekst
-        context_start = max(0, pos_start - 30)
-        context_end = min(len(text), pos_start + 100)
-        context = text[context_start:context_end].replace('\n', '↵')
-        print(f"   ✅ START: pozycja {pos_start} (score: {score_start:.1f})")
-        print(f"      Kontekst: '{context[:80]}...'")
+        # ✅ Znaleziono fragment
+        context = text[max(0, pos_start-30):pos_start+80].replace('\n', '↵')
+        print(f"   ✅ Znaleziono na pozycji {pos_start} (score: {score:.1f})")
+        print(f"      Kontekst: \"{context[:70]}...\"")
         
-        # Szukaj END (od pozycji START)
-        (pos_end, pos_end_end), score_end = find_phrase_with_sliding_window(
-            text, fraza_end, pos_start, threshold=40
-        )
+        # ✅ Znajdź koniec fragmentu (następny akapit lub szacowana długość)
+        estimated_length = len(transkrypcja) * 3
+        search_end = min(len(text), pos_start + estimated_length)
         
-        if pos_end is None:
-            print(f"   ⚠️  Nie znaleziono END (score: {score_end:.1f})")
-            shorter_end = ' '.join(fraza_end.split()[-5:])
-            print(f"   🔄 Próbuję z 5 słowami...")
-            (pos_end, pos_end_end), score_end = find_phrase_with_sliding_window(
-                text, shorter_end, pos_start, threshold=30
-            )
-            
-            if pos_end is None:
-                print(f"   ❌ Nie znaleziono END (score: {score_end:.1f})")
-                fragmenty.append({
-                    'found': False,
-                    'plik': plik,
-                    'fraza_end': fraza_end,
-                    'pos_start': pos_start,
-                    'score_end': score_end
-                })
-                continue
+        # Szukaj końca akapitu
+        next_para = text.find('\n\n', pos_start + 50, search_end)
+        if next_para != -1:
+            pos_end = next_para
+        else:
+            pos_end = search_end
         
-        # Kontekst END
-        context_end_start = max(0, pos_end - 30)
-        context_end_end = min(len(text), pos_end + 100)
-        context_end_text = text[context_end_start:context_end_end].replace('\n', '↵')
-        print(f"   ✅ END: pozycja {pos_end} (score: {score_end:.1f})")
-        print(f"      Kontekst: '{context_end_text[:80]}...'")
-        
-        # ✅ POPRAWKA: Jeśli END == START, użyj szacowanej długości
-        if pos_end == pos_start:
-            print(f"   ℹ️  END = START ({pos_end}) → fragment krótki, używam szacowanej długości")
-            
-            estimated_length = len(pelna_transkrypcja) * 3
-            pos_end_end = pos_start + estimated_length
-            
-            if pos_end_end > len(text):
-                pos_end_end = len(text)
-            
-            print(f"   📏 Szacowana długość: {estimated_length} znaków → pozycja {pos_end_end}")
-            
-            pozycje_separatorow.append({
-                'numer': idx + 1,
-                'pozycja': pos_start,
-                'plik': plik
-            })
-            
-            fragmenty.append({
-                'found': True,
-                'plik': plik,
-                'pos_start': pos_start,
-                'pos_end': pos_end_end,
-                'score_start': score_start,
-                'score_end': score_end,
-                'text': text[pos_start:pos_end_end],
-                'start_ms': item['start_ms'],
-                'end_ms': item['end_ms'],
-                'estimated_end': True
-            })
-            
-            last_search_pos = pos_end_end
-            print(f"   ✅ Fragment dodany (END oszacowany): tekst[{pos_start}:{pos_end_end}]")
-            print()
-            continue
-        
-        # Sprawdź czy END jest PRZED START
-        if pos_end < pos_start:
-            print(f"   ❌ END ({pos_end}) jest PRZED START ({pos_start})!")
-            fragmenty.append({
-                'found': False,
-                'plik': plik,
-                'reason': 'end_przed_start',
-                'pos_start': pos_start,
-                'pos_end': pos_end
-            })
-            continue
-        
-        # ✅ Sukces!
+        # Zapisz separator
         pozycje_separatorow.append({
             'numer': idx + 1,
             'pozycja': pos_start,
@@ -444,20 +366,17 @@ def wstaw_entery_z_podwojna_weryfikacja(text, frazy, prog=40, text_file=None):
             'found': True,
             'plik': plik,
             'pos_start': pos_start,
-            'pos_end': pos_end_end,
-            'score_start': score_start,
-            'score_end': score_end,
-            'text': text[pos_start:pos_end_end],
+            'pos_end': pos_end,
+            'score': score,
+            'text': text[pos_start:pos_end],
             'start_ms': item['start_ms'],
             'end_ms': item['end_ms']
         })
         
-        last_search_pos = pos_end_end
-        
-        print(f"   ✅ Fragment znaleziony: tekst[{pos_start}:{pos_end_end}]")
+        last_search_pos = pos_end
         print()
     
-    # ✅ Wstaw separatory
+    # Wstaw separatory
     if pozycje_separatorow and text_file:
         print(f"\n{'='*80}")
         print(f"📝 WSTAWIAM SEPARATORY W TEKŚCIE")
@@ -494,7 +413,7 @@ def wstaw_entery_z_podwojna_weryfikacja(text, frazy, prog=40, text_file=None):
 
 def utworz_fragmenty_mp3(audio, fragmenty, output_folder):
     """
-    ✅ POPRAWIONE: Kopiuje pliki MP3 zamiast wycinać z jednego dużego
+    Kopiuje pliki MP3 zamiast wycinać z jednego dużego
     """
     print(f"\n{'='*80}")
     print(f"✂️  KOPIUJĘ FRAGMENTY MP3")
@@ -507,7 +426,6 @@ def utworz_fragmenty_mp3(audio, fragmenty, output_folder):
             print(f"⏭️  [{idx+1}] Pomijam {fragment['plik']} - nie znaleziono w tekście")
             continue
         
-        # Pobierz oryginalny plik MP3
         base_dir = os.path.dirname(output_folder)
         mp3_source = os.path.join(base_dir, "mp3", fragment['plik'])
         
@@ -515,7 +433,6 @@ def utworz_fragmenty_mp3(audio, fragmenty, output_folder):
             print(f"   ❌ Nie znaleziono pliku źródłowego: {mp3_source}")
             continue
         
-        # Skopiuj do folderu wyjściowego
         output_path = os.path.join(output_folder, fragment['plik'])
         
         import shutil
@@ -538,15 +455,10 @@ def run():
     """
     import os
     
-    # Ustal ścieżki
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    
-    # ✅ NIE SZUKAMY już jednego dużego pliku MP3!
-    # Małe pliki są w temp/mp3/
-    
-    # ✅ Szukaj pliku tekstowego w formacie ROZDZIAŁ_LICZBA.txt
     temp_folder = os.path.join(base_dir, "temp")
     
+    # Szukaj pliku tekstowego
     text_files = []
     for f in os.listdir(temp_folder):
         if f.endswith('.txt'):
@@ -556,7 +468,6 @@ def run():
     
     if not text_files:
         print(f"❌ Brak plików tekstowych w folderze: {temp_folder}")
-        print(f"   Szukam plików w formacie: ROZDZIAŁ_[liczba].txt")
         return
     
     text_file = os.path.join(temp_folder, text_files[0])
@@ -575,21 +486,19 @@ def run():
     
     print(f"📁 Folder MP3: {mp3_folder} ({len(pliki_mp3)} plików)")
     
-    # Folder wyjściowy
     output_folder = os.path.join(base_dir, "temp", "fragmenty")
     print(f"📂 Folder wyjściowy: {output_folder}")
     
-    # Uruchom podział
     print(f"\n{'='*80}")
     print(f"🚀 ROZPOCZYNAM PRZETWARZANIE")
     print(f"{'='*80}\n")
     
     try:
         fragmenty = podziel_na_fragmenty_z_enterami(
-            plik_mp3=None,  # Nie potrzebujemy jednego dużego pliku
+            plik_mp3=None,
             text_file=text_file,
             output_folder=output_folder,
-            prog=40
+            prog=35  # ✅ Obniżony próg dla lepszego dopasowania
         )
         
         print(f"\n{'='*80}")
